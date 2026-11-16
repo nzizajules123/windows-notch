@@ -27,11 +27,33 @@ Expanded tabs:
 | 🖐 Open palm | **Restart**, after a 5-second countdown you can cancel |
 | ✊ during a countdown | **Cancel** the restart / shutdown |
 
-- The camera image is never shown or saved. Google MediaPipe runs in a hidden WebView2 and only gesture names come back.
+- **Camera preview** (Control → Hand gestures → *Camera preview*): a small always-on-top window with the live camera,
+  the tracked hand skeleton, the recognised gesture and a "move closer" meter. Close it any time; gestures keep working.
+  The camera image is never saved or sent anywhere.
 - "Near the camera only": the hand has to fill about 30 % of the frame (`MinHandSize`), so people in the background are ignored.
 - The camera is released while the PC is locked, and gestures are never acted on from the lock screen.
 
-## Run
+**Two gesture engines.** The notch picks one automatically:
+
+| Engine | Used when | Notes |
+|---|---|---|
+| **Python** (recommended) | Python 3.9–3.12 with `opencv-python` + `mediapipe` installed | Reads the camera through DirectShow, cleans the picture (stripe removal, denoise, exposure fix) before detection. Best for cheap or noisy webcams. |
+| Built-in | otherwise | MediaPipe in a hidden WebView2. Nothing to install. |
+
+Install the Python engine's packages once:
+
+```bash
+py -3.12 -m pip install -r python/requirements.txt
+```
+
+Check your camera's picture quality with `python python/camera_probe.py` (lower `stripes` / `colnoise` is better).
+
+## Download
+
+Grab `WindowsNotch-v*-win-x64.zip` from the [Releases](../../releases) page, unzip it anywhere and run `WindowsNotch.exe`.
+It's self-contained: no .NET install needed.
+
+## Build from source
 
 ```bash
 dotnet build -c Release
