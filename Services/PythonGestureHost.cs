@@ -106,12 +106,19 @@ public sealed class PythonGestureHost : IGestureEngine
                     || e.Data.StartsWith("INFO:") || e.Data.Contains("[ WARN:")) return;
                 App.Log("python: " + e.Data);
             };
-            _proc.Exited += (_, _) => Ui(() =>
+            var proc = _proc;
+            _proc.Exited += (_, _) =>
             {
-                App.Log($"python engine exited ({_proc?.ExitCode})");
-                _ready = false;
-                StatusChanged?.Invoke("error: gesture engine stopped");
-            });
+                int code = -1;
+                try { code = proc.ExitCode; } catch { /* disposed during shutdown */ }
+                Ui(() =>
+                {
+                    if (_disposed) return;
+                    App.Log($"python engine exited ({code})");
+                    _ready = false;
+                    StatusChanged?.Invoke("error: gesture engine stopped");
+                });
+            };
             _proc.Start();
             _proc.BeginOutputReadLine();
             _proc.BeginErrorReadLine();
@@ -166,6 +173,7 @@ public sealed class PythonGestureHost : IGestureEngine
 
     private void Send(string cmd)
     {
+        if (_disposed) return;
         try
         {
             if (_proc is { HasExited: false })
@@ -174,14 +182,17 @@ public sealed class PythonGestureHost : IGestureEngine
                 _proc.StandardInput.Flush();
             }
         }
-        catch (Exception ex) { App.Log(ex); }
+        catch (Exception ex) { App.Log("python send: " + ex.Message); }
     }
+
+    private bool _disposed;
 
     public void Dispose()
     {
         try
         {
             Send("quit");
+            _disposed = true;
             if (_proc is { HasExited: false } && !_proc.WaitForExit(1500)) _proc.Kill(true);
         }
         catch { }
