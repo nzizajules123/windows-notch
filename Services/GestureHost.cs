@@ -13,7 +13,7 @@ namespace WindowsNotch.Services;
 /// Runs Google MediaPipe's hand-gesture recognizer inside an invisible, off-screen WebView2.
 /// The camera feed is never displayed; only gesture names + hand size come back.
 /// </summary>
-public sealed class GestureHost : IDisposable
+public sealed class GestureHost : IGestureEngine
 {
     private Window? _win;
     private WebView2? _web;

@@ -33,7 +33,7 @@ public partial class NotchWindow : Window
     private readonly CaptionService _captions = new();
     private readonly AppsService _apps = new();
     private readonly ShelfService _shelf = new();
-    private GestureHost? _gestures;
+    private IGestureEngine? _gestures;
 
     // ---- state ------------------------------------------------------------
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -681,7 +681,7 @@ public partial class NotchWindow : Window
         if (key == _lyricsKey) return;
         _lyricsKey = key;
         _currentLyrics = null;
-        var result = await _lyrics.GetAsync(m.Title, m.Artist, m.Duration);
+        var result = await _lyrics.GetAsync(m.Title, m.Artist, m.Duration, fromMusicApp: m.IsSpotify);
         if (_lyricsKey == key) _currentLyrics = result;
         RefreshLiveLine();
     }
@@ -1170,7 +1170,18 @@ public partial class NotchWindow : Window
     {
         if (_gestures == null)
         {
-            _gestures = new GestureHost { MinHandSize = _settings.MinHandSize };
+            // Prefer the Python/OpenCV engine (cleaner camera capture + picture clean-up);
+            // fall back to the built-in WebView2 engine when Python/OpenCV/MediaPipe aren't installed.
+            string? python = null;
+            if (_settings.GestureEngine != "web")
+            {
+                _gestureState = "loading"; UpdateGestureUi();
+                python = await PythonGestureHost.FindPythonAsync(_settings.PythonPath);
+            }
+            if (_gestures != null) return; // started meanwhile
+            App.Log(python != null ? $"gestures: using Python engine ({python})" : "gestures: using built-in WebView2 engine");
+            _gestures = python != null ? new PythonGestureHost(python) : new GestureHost();
+            _gestures.MinHandSize = _settings.MinHandSize;
             _gestures.StatusChanged += st => { App.Log("gestures: " + st); _gestureState = st; UpdateGestureUi(); };
             _gestures.Frame += OnGestureFrame;
             _gestures.PreviewClosed += () =>

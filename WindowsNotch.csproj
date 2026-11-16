@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <None Update="web\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="python\*.py;python\requirements.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

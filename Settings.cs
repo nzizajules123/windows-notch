@@ -11,6 +11,10 @@ public sealed class Settings
     /// <summary>How big the hand must be in the camera frame (0..1). Higher = hand must be closer.</summary>
     public double MinHandSize { get; set; } = 0.30;
     public bool ShowCameraPreview { get; set; } = true;
+    /// <summary>"auto" (Python if installed, else built-in), "python" or "web".</summary>
+    public string GestureEngine { get; set; } = "auto";
+    /// <summary>Optional path to a python.exe that has opencv-python + mediapipe.</summary>
+    public string? PythonPath { get; set; }
 
     /// <summary>How long a gesture must be held before it fires.</summary>
     public int HoldMs { get; set; } = 900;
