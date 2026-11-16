@@ -56,36 +56,17 @@ internal static class Native
     [DllImport("wtsapi32.dll")] private static extern void WTSFreeMemory(IntPtr p);
 
     /// <summary>True when this Windows session is locked (lock screen / PIN screen showing).</summary>
+    /// <summary>Lock state from the SessionSwitch lock/unlock events (null until the first event arrives).</summary>
+    public static bool? LockedByEvent;
+
+    /// <remarks>
+    /// WTSSessionInfoEx's SessionFlags is unreliable (it reports "locked" on unlocked sessions on some
+    /// Windows builds), so we trust the lock/unlock events and fall back to "is the credential UI up?".
+    /// </remarks>
     public static bool IsSessionLocked()
     {
-        try
-        {
-            // WTSSessionInfoEx (25) → WTSINFOEXW { Level, SessionId, SessionState, SessionFlags … }
-            if (WTSQuerySessionInformation(IntPtr.Zero, System.Diagnostics.Process.GetCurrentProcess().SessionId, 25, out var buf, out _))
-            {
-                try
-                {
-                    var flags = Marshal.ReadInt32(buf, 12);
-                    if (flags == 0 /*WTS_SESSIONSTATE_LOCK*/) return true;
-                    if (flags == 1 /*WTS_SESSIONSTATE_UNLOCK*/) return false;
-                }
-                finally { WTSFreeMemory(buf); }
-            }
-        }
-        catch { /* fall through */ }
-
-        // Fallback: the credential UI only runs while locked / at sign-in.
-        if (System.Diagnostics.Process.GetProcessesByName("LogonUI").Length > 0) return true;
-
-        var desk = OpenInputDesktop(0, false, 0x0001 /*DESKTOP_READOBJECTS*/);
-        if (desk == IntPtr.Zero) return true;
-        try
-        {
-            var sb = new StringBuilder(256);
-            return GetUserObjectInformation(desk, 2 /*UOI_NAME*/, sb, sb.Capacity * 2, out _)
-                && !string.Equals(sb.ToString(), "Default", StringComparison.OrdinalIgnoreCase);
-        }
-        finally { CloseDesktop(desk); }
+        if (LockedByEvent is bool b) return b;
+        return System.Diagnostics.Process.GetProcessesByName("LogonUI").Length > 0;
     }
 
     [StructLayout(LayoutKind.Sequential)]

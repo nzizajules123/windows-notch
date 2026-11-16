@@ -64,7 +64,8 @@ public partial class NotchWindow : Window
 
     // gesture hold tracking
     private string _gCur = "None";
-    private DateTime _gSince, _gCooldown;
+    private DateTime _gSince, _gCooldown, _gNextTrace;
+    private int _gFrames;
     private (string gesture, double progress)? _hold;
 
     // shelf drag-out tracking
@@ -1169,7 +1170,7 @@ public partial class NotchWindow : Window
         if (_gestures == null)
         {
             _gestures = new GestureHost();
-            _gestures.StatusChanged += st => { _gestureState = st; UpdateGestureUi(); };
+            _gestures.StatusChanged += st => { App.Log("gestures: " + st); _gestureState = st; UpdateGestureUi(); };
             _gestures.Frame += OnGestureFrame;
         }
         await _gestures.StartAsync();
@@ -1203,6 +1204,9 @@ public partial class NotchWindow : Window
     {
         // Release the camera while the PC is locked (Windows Hello may need it, and
         // no accidental restart can be triggered from the lock screen).
+        if (e.Reason == SessionSwitchReason.SessionLock) Native.LockedByEvent = true;
+        else if (e.Reason == SessionSwitchReason.SessionUnlock) Native.LockedByEvent = false;
+        App.Log("session: " + e.Reason);
         Dispatcher.BeginInvoke(async () =>
         {
             if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); SetHold(null); }
@@ -1217,6 +1221,12 @@ public partial class NotchWindow : Window
     private void OnGestureFrame(string gesture, double score, double size)
     {
         var now = DateTime.UtcNow;
+        _gFrames++;
+        if (gesture != "None" && now >= _gNextTrace)
+        {
+            _gNextTrace = now.AddSeconds(2);
+            App.Log($"hand seen: {gesture} score {score:0.00} size {size:0.00} (need ≥ {_settings.MinHandSize:0.00})");
+        }
         var near = size >= _settings.MinHandSize && score >= 0.55;
         var eff = near && gesture is "Closed_Fist" or "Open_Palm" ? gesture : "None";
 
