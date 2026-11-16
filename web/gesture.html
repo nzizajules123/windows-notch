@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Notch gesture engine</title></head>
+<body style="margin:0;background:#000">
+<!-- Never shown to the user: this page lives in an off-screen window. -->
+<video id="cam" autoplay playsinline muted width="320" height="240"></video>
+<script type="module">
+const VERSION = "0.10.14";
+const post = (m) => window.chrome?.webview?.postMessage(m);
+const video = document.getElementById("cam");
+
+let recognizer = null, stream = null, timer = null, running = false, lastTs = 0, lastSent = "None";
+
+async function createRecognizer() {
+  const { FilesetResolver, GestureRecognizer } =
+    await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/vision_bundle.mjs`);
+  const fileset = await FilesetResolver.forVisionTasks(
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`);
+  const opts = (delegate) => ({
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+      delegate,
+    },
+    runningMode: "VIDEO",
+    numHands: 1,
+    minHandDetectionConfidence: 0.6,
+    minHandPresenceConfidence: 0.6,
+    minTrackingConfidence: 0.5,
+  });
+  try { return await GestureRecognizer.createFromOptions(fileset, opts("GPU")); }
+  catch { return await GestureRecognizer.createFromOptions(fileset, opts("CPU")); }
+}
+
+async function start() {
+  if (running) return;
+  stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, frameRate: 15 }, audio: false });
+  video.srcObject = stream;
+  await video.play();
+  running = true;
+  post({ type: "status", state: "watching" });
+  timer = setInterval(tick, 100); // ~10 fps is plenty and keeps CPU low
+}
+
+function stop() {
+  running = false;
+  clearInterval(timer);
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  video.srcObject = null;
+  post({ type: "status", state: "off" });
+}
+
+function tick() {
+  if (!running || !recognizer || video.readyState < 2) return;
+  const ts = performance.now();
+  if (ts <= lastTs) return;
+  lastTs = ts;
+
+  const r = recognizer.recognizeForVideo(video, ts);
+  if (!r.gestures?.length || !r.landmarks?.length) {
+    if (lastSent !== "None") post({ type: "frame", gesture: "None", score: 0, size: 0 });
+    lastSent = "None";
+    return;
+  }
+  const g = r.gestures[0][0];
+  // Hand size in the frame tells us how close it is to the camera.
+  let minX = 1, maxX = 0, minY = 1, maxY = 0;
+  for (const p of r.landmarks[0]) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const size = Math.max(maxX - minX, maxY - minY);
+  post({ type: "frame", gesture: g.categoryName, score: g.score, size });
+  lastSent = g.categoryName;
+}
+
+window.chrome?.webview?.addEventListener("message", (e) => {
+  if (e.data === "start") start().catch((err) => post({ type: "error", message: "Camera: " + (err?.message || err) }));
+  else if (e.data === "stop") stop();
+});
+
+createRecognizer()
+  .then((r) => { recognizer = r; post({ type: "ready" }); })
+  .catch((err) => post({ type: "error", message: "Model: " + (err?.message || err) }));
+</script>
+</body>
+</html>
