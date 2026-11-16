@@ -1,15 +1,50 @@
-<!doctype html>
+﻿<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Notch gesture engine</title></head>
-<body style="margin:0;background:#000">
-<!-- Never shown to the user: this page lives in an off-screen window. -->
-<video id="cam" autoplay playsinline muted width="320" height="240"></video>
+<head>
+<meta charset="utf-8">
+<title>Notch gesture engine</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b0d; overflow: hidden;
+               font: 600 11px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #fff; user-select: none; }
+  #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .pill { position: absolute; left: 8px; bottom: 8px; padding: 4px 9px 4px 8px; border-radius: 999px;
+          background: rgba(0,0,0,.62); backdrop-filter: blur(6px); display: flex; gap: 6px; align-items: center;
+          transition: background .2s, transform .2s; }
+  .pill.hit { background: linear-gradient(90deg, #30d158, #0a84ff); transform: scale(1.06); }
+  .pill.lock { background: linear-gradient(90deg, #ff375f, #bf5af2); }
+  .meter { position: absolute; right: 8px; bottom: 10px; width: 64px; height: 6px; border-radius: 3px;
+           background: rgba(255,255,255,.18); overflow: hidden; }
+  .meter > i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px;
+               background: #ffd60a; transition: width .12s, background .2s; }
+  .meter > b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; }
+  .near { position: absolute; right: 8px; bottom: 19px; font-size: 9.5px; opacity: .75; }
+  .rec { position: absolute; left: 9px; top: 8px; display: flex; gap: 5px; align-items: center;
+         font-size: 9.5px; opacity: .85; }
+  .rec::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ff453a;
+                 box-shadow: 0 0 6px #ff453a; animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .msg { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; opacity: .7; }
+</style>
+</head>
+<body>
+<!-- Runs in a tiny window: hidden off-screen normally, or shown as the corner preview. -->
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="view"></canvas>
+<div class="msg" id="msg">Starting camera…</div>
+<div class="rec" id="rec" style="display:none">LIVE</div>
+<div class="pill" id="pill" style="display:none"><span id="pillIcon">✋</span><span id="pillText">No hand</span></div>
+<div class="near" id="nearText" style="display:none">closer</div>
+<div class="meter" id="meter" style="display:none"><i id="meterFill"></i><b id="meterMark"></b></div>
 <script type="module">
 const VERSION = "0.10.14";
 const post = (m) => window.chrome?.webview?.postMessage(m);
-const video = document.getElementById("cam");
+const $ = (id) => document.getElementById(id);
+const video = $("cam"), view = $("view"), vctx = view.getContext("2d");
 
+let delegate = "?", minHand = 0.30, preview = false;
 let recognizer = null, stream = null, timer = null, running = false, lastTs = 0, lastSent = "None";
+let lastResult = null;
 
 async function createRecognizer() {
   const { FilesetResolver, GestureRecognizer } =
@@ -23,22 +58,29 @@ async function createRecognizer() {
     },
     runningMode: "VIDEO",
     numHands: 1,
-    minHandDetectionConfidence: 0.6,
-    minHandPresenceConfidence: 0.6,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.4,
     minTrackingConfidence: 0.5,
   });
-  try { return await GestureRecognizer.createFromOptions(fileset, opts("GPU")); }
-  catch { return await GestureRecognizer.createFromOptions(fileset, opts("CPU")); }
+  // CPU: the GPU delegate can silently return empty results inside a hidden WebView.
+  try { const r = await GestureRecognizer.createFromOptions(fileset, opts("CPU")); delegate = "CPU"; return r; }
+  catch { const r = await GestureRecognizer.createFromOptions(fileset, opts("GPU")); delegate = "GPU"; return r; }
 }
 
 async function start() {
   if (running) return;
-  stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, frameRate: 15 }, audio: false });
+  $("msg").textContent = "Starting camera…";
+  stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: 15 }, audio: false });
   video.srcObject = stream;
   await video.play();
   running = true;
+  $("msg").style.display = "none";
+  for (const id of ["rec", "pill", "meter", "nearText"]) $(id).style.display = "";
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  post({ type: "diag", text: "cameras: " + cams.map((c) => `"${c.label}"`).join(", ") + "  gpu: " + glInfo() });
   post({ type: "status", state: "watching" });
-  timer = setInterval(tick, 100); // ~10 fps is plenty and keeps CPU low
+  timer = setInterval(tick, 100);
+  requestAnimationFrame(draw);
 }
 
 function stop() {
@@ -47,22 +89,114 @@ function stop() {
   stream?.getTracks().forEach((t) => t.stop());
   stream = null;
   video.srcObject = null;
+  lastResult = null;
+  for (const id of ["rec", "pill", "meter", "nearText"]) $(id).style.display = "none";
+  $("msg").style.display = ""; $("msg").textContent = "Camera off";
+  vctx.clearRect(0, 0, view.width, view.height);
   post({ type: "status", state: "off" });
 }
 
+// ---------------------------------------------------------------- preview drawing
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+               [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+function draw() {
+  if (!running) return;
+  requestAnimationFrame(draw);
+  if (!preview) return;
+  const w = view.clientWidth * devicePixelRatio, h = view.clientHeight * devicePixelRatio;
+  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
+  if (video.readyState < 2) return;
+
+  // cover-fit, mirrored like a selfie camera
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const s = Math.max(w / vw, h / vh), dw = vw * s, dh = vh * s, dx = (w - dw) / 2, dy = (h - dh) / 2;
+  vctx.save();
+  vctx.translate(w, 0); vctx.scale(-1, 1);
+  vctx.drawImage(video, dx, dy, dw, dh);
+  vctx.restore();
+
+  const lm = lastResult?.landmarks?.[0];
+  if (!lm) return;
+  const P = (p) => [w - (dx + p.x * dw), dy + p.y * dh];
+  const g = lastResult.gestures?.[0]?.[0]?.categoryName;
+  const col = g === "Closed_Fist" ? "#ff375f" : g === "Open_Palm" ? "#30d158" : "#0a84ff";
+  vctx.lineCap = "round";
+  vctx.strokeStyle = col; vctx.lineWidth = 3 * devicePixelRatio;
+  vctx.shadowColor = col; vctx.shadowBlur = 8 * devicePixelRatio;
+  vctx.beginPath();
+  for (const [a, b] of BONES) { const [ax, ay] = P(lm[a]), [bx, by] = P(lm[b]); vctx.moveTo(ax, ay); vctx.lineTo(bx, by); }
+  vctx.stroke();
+  vctx.shadowBlur = 0; vctx.fillStyle = "#fff";
+  for (const p of lm) { const [x, y] = P(p); vctx.beginPath(); vctx.arc(x, y, 2.2 * devicePixelRatio, 0, 7); vctx.fill(); }
+}
+
+function showResult(gesture, score, size) {
+  const pill = $("pill");
+  const names = { Closed_Fist: ["✊", "Fist · lock"], Open_Palm: ["🖐", "Open palm · restart"], None: ["✋", "Hand · no gesture"] };
+  const [icon, text] = size === 0 ? ["👀", "No hand"] : (names[gesture] || ["✋", gesture.replace("_", " ")]);
+  const near = size >= minHand;
+  $("pillIcon").textContent = icon;
+  $("pillText").textContent = size === 0 ? text : `${text}  ${Math.round(score * 100)}%`;
+  pill.className = "pill" + (near && gesture === "Open_Palm" ? " hit" : near && gesture === "Closed_Fist" ? " hit lock" : "");
+  const full = Math.max(minHand * 1.6, 0.5);
+  $("meterFill").style.width = Math.min(100, (size / full) * 100) + "%";
+  $("meterFill").style.background = near ? "#30d158" : "#ffd60a";
+  $("meterMark").style.left = (minHand / full) * 100 + "%";
+  $("nearText").textContent = size === 0 ? "" : near ? "close enough" : "move closer";
+}
+
+// ---------------------------------------------------------------- diagnostics (app log, every 5 s)
+const diag = { ticks: 0, processed: 0, hands: 0, lastError: "" };
+const frame = document.createElement("canvas");
+frame.width = 640; frame.height = 480;
+const frameCtx = frame.getContext("2d", { willReadFrequently: true });
+function glInfo() {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    if (!gl) return "no-webgl2";
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "webgl2";
+  } catch (e) { return "gl-error"; }
+}
+setInterval(() => {
+  if (!running) return;
+  post({ type: "diag", text:
+    `${delegate} frames=${diag.processed}/${diag.ticks} hands=${diag.hands} ` +
+    `video=${video.videoWidth}x${video.videoHeight} visibility=${document.visibilityState} ` +
+    `track=${stream?.getVideoTracks()[0]?.readyState} preview=${preview} err=${diag.lastError}` });
+  diag.ticks = diag.processed = diag.hands = 0;
+}, 5000);
+
+// ---------------------------------------------------------------- recognition loop (~10 fps)
 function tick() {
+  diag.ticks++;
+  try { step(); } catch (err) { diag.lastError = String(err?.message || err).slice(0, 160); }
+}
+
+function step() {
   if (!running || !recognizer || video.readyState < 2) return;
+  if (video.paused) video.play().catch(() => {});
   const ts = performance.now();
   if (ts <= lastTs) return;
   lastTs = ts;
 
-  const r = recognizer.recognizeForVideo(video, ts);
-  if (!r.gestures?.length || !r.landmarks?.length) {
+  // A 2D-canvas copy of the frame: inside a hidden WebView the <video> element can reach
+  // WebGL as a blank texture even though the camera is delivering frames.
+  if (frame.width !== video.videoWidth && video.videoWidth) { frame.width = video.videoWidth; frame.height = video.videoHeight; }
+  frameCtx.drawImage(video, 0, 0, frame.width, frame.height);
+  const r = recognizer.recognizeForVideo(frame, ts);
+  lastResult = r;
+  diag.processed++;
+
+  if (!r.landmarks?.length) {
+    showResult("None", 0, 0);
     if (lastSent !== "None") post({ type: "frame", gesture: "None", score: 0, size: 0 });
     lastSent = "None";
     return;
   }
-  const g = r.gestures[0][0];
+  diag.hands++;
+  const g = r.gestures?.[0]?.[0] ?? { categoryName: "None", score: 0 };
   // Hand size in the frame tells us how close it is to the camera.
   let minX = 1, maxX = 0, minY = 1, maxY = 0;
   for (const p of r.landmarks[0]) {
@@ -70,18 +204,23 @@ function tick() {
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   }
   const size = Math.max(maxX - minX, maxY - minY);
+  showResult(g.categoryName, g.score, size);
   post({ type: "frame", gesture: g.categoryName, score: g.score, size });
   lastSent = g.categoryName;
 }
 
 window.chrome?.webview?.addEventListener("message", (e) => {
-  if (e.data === "start") start().catch((err) => post({ type: "error", message: "Camera: " + (err?.message || err) }));
-  else if (e.data === "stop") stop();
+  const m = String(e.data);
+  if (m === "start") start().catch((err) => { $("msg").textContent = "Camera error"; post({ type: "error", message: "Camera: " + (err?.message || err) }); });
+  else if (m === "stop") stop();
+  else if (m.startsWith("minhand:")) minHand = parseFloat(m.slice(8)) || minHand;
+  else if (m.startsWith("preview:")) preview = m.endsWith("on");
 });
 
+$("msg").textContent = "Loading hand model…";
 createRecognizer()
-  .then((r) => { recognizer = r; post({ type: "ready" }); })
-  .catch((err) => post({ type: "error", message: "Model: " + (err?.message || err) }));
+  .then((r) => { recognizer = r; $("msg").textContent = "Ready"; post({ type: "ready" }); })
+  .catch((err) => { $("msg").textContent = "Model failed to load"; post({ type: "error", message: "Model: " + (err?.message || err) }); });
 </script>
 </body>
 </html>

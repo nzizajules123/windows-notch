@@ -114,6 +114,7 @@ public partial class NotchWindow : Window
         LyricsToggle.IsChecked = _settings.LyricsEnabled;
         CcToggle.IsChecked = _settings.CaptionsEnabled;
         GestureSwitch.IsChecked = _settings.GesturesEnabled;
+        PreviewChip.IsChecked = _settings.ShowCameraPreview;
         StartupSwitch.IsChecked = PowerService.StartsWithWindows;
 
         SourceInitialized += OnSourceInitialized;
@@ -1169,10 +1170,17 @@ public partial class NotchWindow : Window
     {
         if (_gestures == null)
         {
-            _gestures = new GestureHost();
+            _gestures = new GestureHost { MinHandSize = _settings.MinHandSize };
             _gestures.StatusChanged += st => { App.Log("gestures: " + st); _gestureState = st; UpdateGestureUi(); };
             _gestures.Frame += OnGestureFrame;
+            _gestures.PreviewClosed += () =>
+            {
+                _settings.ShowCameraPreview = false;
+                _settings.Save();
+                PreviewChip.IsChecked = false;
+            };
         }
+        _gestures.SetPreview(_settings.ShowCameraPreview);
         await _gestures.StartAsync();
     }
 
@@ -1198,6 +1206,22 @@ public partial class NotchWindow : Window
         if (_settings.GesturesEnabled) await StartGesturesAsync();
         else { _gestures?.Stop(); SetHold(null); }
         UpdateGestureUi();
+    }
+
+    private async void PreviewChip_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ShowCameraPreview = PreviewChip.IsChecked == true;
+        _settings.Save();
+        if (_settings.ShowCameraPreview && !_settings.GesturesEnabled)
+        {
+            // preview needs the camera running → switch gestures on as well
+            _settings.GesturesEnabled = true;
+            _settings.Save();
+            GestureSwitch.IsChecked = true;
+            await StartGesturesAsync();
+            UpdateGestureUi();
+        }
+        else _gestures?.SetPreview(_settings.ShowCameraPreview);
     }
 
     private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)

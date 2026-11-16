@@ -1,7 +1,9 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -40,24 +42,31 @@ public sealed class GestureHost : IDisposable
         StatusChanged?.Invoke("loading");
         try
         {
-            _web = new WebView2();
+            _web = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 11, 11, 13) };
             _win = new Window
             {
-                Title = "Notch Gesture Engine",
-                Width = 320, Height = 240,
+                Title = "Gesture camera",
+                Width = PreviewW, Height = PreviewH,
                 Left = -32000, Top = -32000,
                 WindowStyle = WindowStyle.None,
                 ResizeMode = ResizeMode.NoResize,
                 ShowInTaskbar = false,
                 ShowActivated = false,
-                Content = _web,
+                Topmost = true,
+                Background = new SolidColorBrush(Color.FromRgb(11, 11, 13)),
+                Content = BuildChrome(_web),
             };
             _win.Show();
             Native.AddExStyle(new WindowInteropHelper(_win).Handle, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
+            // Windows 11 rounded corners for the preview card
+            int round = 2; // DWMWCP_ROUND
+            Native.DwmSetWindowAttribute(new WindowInteropHelper(_win).Handle, 33, ref round, sizeof(int));
+            ApplyPreview();
 
             var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsNotch", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, dataDir, new CoreWebView2EnvironmentOptions(
-                "--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"));
+                "--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows " +
+                "--disable-features=CalculateNativeWinOcclusion"));
             await _web.EnsureCoreWebView2Async(env);
 
             var core = _web.CoreWebView2;
@@ -92,6 +101,8 @@ public sealed class GestureHost : IDisposable
             {
                 case "ready":
                     _ready = true;
+                    Post("minhand:" + MinHandSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    Post("preview:" + (_preview ? "on" : "off"));
                     StatusChanged?.Invoke("ready");
                     if (_wantRunning) Post("start");
                     break;
@@ -101,6 +112,9 @@ public sealed class GestureHost : IDisposable
                 case "frame":
                     Frame?.Invoke(root.GetProperty("gesture").GetString() ?? "None",
                         root.GetProperty("score").GetDouble(), root.GetProperty("size").GetDouble());
+                    break;
+                case "diag":
+                    App.Log("gesture engine: " + root.GetProperty("text").GetString());
                     break;
                 case "error":
                     var msg = root.GetProperty("message").GetString();
@@ -113,6 +127,77 @@ public sealed class GestureHost : IDisposable
     }
 
     private void Post(string message) => _web?.CoreWebView2?.PostWebMessageAsString(message);
+
+    // ------------------------------------------------------------------ live preview
+    private const double PreviewW = 260, PreviewH = 222; // 26 px title bar + 4:3 video
+    private bool _preview;
+    public double MinHandSize { get; set; } = 0.30;
+
+    /// <summary>Raised when the user closes the preview with its ✕ button.</summary>
+    public event Action? PreviewClosed;
+
+    /// <summary>Shows the camera in a small always-on-top card in the bottom-right corner (or hides it off-screen).</summary>
+    public void SetPreview(bool on)
+    {
+        _preview = on;
+        ApplyPreview();
+    }
+
+    private void ApplyPreview()
+    {
+        if (_win == null) return;
+        if (_preview)
+        {
+            var wa = SystemParameters.WorkArea;
+            if (_win.Left < wa.Left - 1000) // first show → park in the corner
+            {
+                _win.Left = wa.Right - PreviewW - 16;
+                _win.Top = wa.Bottom - PreviewH - 16;
+            }
+        }
+        else
+        {
+            _win.Left = -32000;
+            _win.Top = -32000;
+        }
+        if (_ready) Post("preview:" + (_preview ? "on" : "off"));
+    }
+
+    private UIElement BuildChrome(WebView2 web)
+    {
+        var title = new TextBlock
+        {
+            Text = "●  Gesture camera",
+            Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)),
+            FontSize = 11, FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0),
+        };
+        var close = new Button
+        {
+            Content = "✕", Width = 26, Height = 26, FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF)),
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Right,
+            ToolTip = "Hide camera preview (gestures keep working)",
+        };
+        close.Click += (_, _) => { SetPreview(false); PreviewClosed?.Invoke(); };
+
+        var bar = new Grid
+        {
+            Height = 26,
+            Background = new LinearGradientBrush(Color.FromRgb(0x1C, 0x1C, 0x22), Color.FromRgb(0x11, 0x11, 0x14), 90),
+            Cursor = System.Windows.Input.Cursors.SizeAll,
+        };
+        bar.Children.Add(title);
+        bar.Children.Add(close);
+        bar.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is not Button) try { _win?.DragMove(); } catch { } };
+
+        var root = new DockPanel();
+        DockPanel.SetDock(bar, Dock.Top);
+        root.Children.Add(bar);
+        root.Children.Add(web);
+        return root;
+    }
 
     public void Dispose()
     {

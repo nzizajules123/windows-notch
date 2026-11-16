@@ -10,6 +10,7 @@ public sealed class Settings
 
     /// <summary>How big the hand must be in the camera frame (0..1). Higher = hand must be closer.</summary>
     public double MinHandSize { get; set; } = 0.30;
+    public bool ShowCameraPreview { get; set; } = true;
 
     /// <summary>How long a gesture must be held before it fires.</summary>
     public int HoldMs { get; set; } = 900;

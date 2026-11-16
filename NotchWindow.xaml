@@ -556,6 +556,10 @@
                                             <TextBlock Text="Hand gestures" FontSize="12.5" FontWeight="SemiBold"/>
                                             <TextBlock x:Name="GestureStatus" FontSize="10.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis"
                                                        Text="✊ close hand = lock  ·  🖐 open palm = restart"/>
+                                            <ToggleButton x:Name="PreviewChip" Style="{StaticResource ChipToggle}" HorizontalAlignment="Left" Margin="0,6,0,0"
+                                                          Click="PreviewChip_Click" ToolTip="Show the live camera with hand tracking in a small corner window">
+                                                <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE714;" FontSize="10" Margin="0,0,5,0"/><TextBlock Text="Camera preview"/></StackPanel>
+                                            </ToggleButton>
                                         </StackPanel>
                                         <CheckBox x:Name="GestureSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="GestureSwitch_Click"/>
                                     </Grid>
