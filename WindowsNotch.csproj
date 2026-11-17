@@ -11,7 +11,7 @@
     <RootNamespace>WindowsNotch</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Product>Windows Notch</Product>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
