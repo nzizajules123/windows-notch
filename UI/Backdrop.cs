@@ -151,8 +151,17 @@ public sealed class BlurBacking : IDisposable
         _src.CompositionTarget.BackgroundColor = System.Windows.Media.Colors.Transparent;
         var m = new Margins { L = -1, R = -1, T = -1, B = -1 };
         DwmExtendFrameIntoClientArea(_src.Handle, ref m);
-        Backdrop.SetAccent(_src.Handle, 3 /*blur behind*/, 0x01000000);
+        // Windows 11 22H2+: official system backdrop (acrylic = DWMSBT_TRANSIENTWINDOW), no DWM rounding of its own
+        int backdrop = 3, corners = 1 /*DWMWCP_DONOTROUND*/, dark = 1;
+        DwmSetWindowAttribute(_src.Handle, 20 /*USE_IMMERSIVE_DARK_MODE*/, ref dark, 4);
+        DwmSetWindowAttribute(_src.Handle, 33 /*WINDOW_CORNER_PREFERENCE*/, ref corners, 4);
+        Supported = DwmSetWindowAttribute(_src.Handle, 38 /*SYSTEMBACKDROP_TYPE*/, ref backdrop, 4) == 0;
     }
+
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
+
+    /// <summary>False on Windows versions without the system-backdrop API.</summary>
+    public bool Supported { get; }
 
     /// <summary>Places the blur exactly under the island (device pixels, screen coordinates), just below <paramref name="above"/>.</summary>
     public void Place(IntPtr above, int x, int y, int w, int h, double radius, int ear)

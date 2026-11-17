@@ -32,8 +32,9 @@ sleepy (muted, very dim screen, battery ≤ 15 %) and sad (internet lost, device
 
 ### Look
 
-The island has a real **frosted-glass backdrop**: Windows acrylic blur clipped to the exact notch shape. It's solid black
-while small and frosted when open. Gradients are kept to a minimum: flat colours, glass tiles and soft glows.
+The island is solid black while small and dark smoked glass when open, with smooth rounded corners. Gradients are kept to a
+minimum: flat colours, glass tiles and soft glows. (Windows' own blur can be tried with `"SystemBlur": true` in settings,
+but some Windows builds draw it as a square box.)
 
 ### Plug-in animations
 

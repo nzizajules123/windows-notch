@@ -45,8 +45,9 @@ public partial class NotchWindow : Window
     // the island's tint over the acrylic blur: solid while collapsed, frosted when open
     private readonly SolidColorBrush _glass = new(Color.FromRgb(0, 0, 0));
     private static readonly Color GlassCollapsed = Color.FromArgb(0xFF, 0, 0, 0);
-    private static readonly Color GlassPeek = Color.FromArgb(0xC4, 0x0E, 0x0E, 0x12);
-    private static readonly Color GlassOpen = Color.FromArgb(0xAE, 0x0E, 0x0E, 0x12);
+    // smoked glass (no system blur behind it, so it stays nearly opaque to keep text readable)
+    private static readonly Color GlassPeek = Color.FromArgb(0xF5, 0x0C, 0x0C, 0x10);
+    private static readonly Color GlassOpen = Color.FromArgb(0xF0, 0x0E, 0x0E, 0x12);
     private float _lastVolume = -1;
 
     // ---- state ------------------------------------------------------------
@@ -157,7 +158,10 @@ public partial class NotchWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
         PositionWindow();
-        if (App.SnapshotDir == null)
+        // System blur is off: on this Windows build DWM draws accent / system backdrops as a solid square
+        // that ignores the window's rounded clip region, so the island is drawn entirely by WPF instead
+        // (smooth anti-aliased corners, dark smoked glass).
+        if (App.SnapshotDir == null && _settings.SystemBlur)
         {
             try { _backing = new BlurBacking(); } catch (Exception ex) { App.Log("blur backing: " + ex.Message); }
             SetBlur(true);
@@ -722,7 +726,7 @@ public partial class NotchWindow : Window
 
     private void UpdateRegion()
     {
-        if (_hwnd == IntPtr.Zero || App.SnapshotDir != null || !IsLoaded) return;
+        if (_hwnd == IntPtr.Zero || App.SnapshotDir != null || !IsLoaded || _backing == null) return;
         double w = Notch.ActualWidth, h = Notch.ActualHeight;
         if (w <= 0 || h <= 0) return;
         var dpi = VisualTreeHelper.GetDpi(this);
