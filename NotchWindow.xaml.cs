@@ -39,7 +39,14 @@ public partial class NotchWindow : Window
     private readonly NetworkWatcher _network = new();
     private readonly NotificationWatcher _notifications = new();
     private readonly DispatcherTimer _hudTimer = new();
-    private bool _hudShown, _eyesDancing;
+    private bool _hudShown, _eyesDancing, _blurOn;
+    private readonly DeviceWatcher _devices = new();
+    private UIElement? _card;                                  // view shown in Peek mode (peek / charge / device)
+    // the island's tint over the acrylic blur: solid while collapsed, frosted when open
+    private readonly SolidColorBrush _glass = new(Color.FromRgb(0, 0, 0));
+    private static readonly Color GlassCollapsed = Color.FromArgb(0xFF, 0, 0, 0);
+    private static readonly Color GlassPeek = Color.FromArgb(0xC4, 0x0E, 0x0E, 0x12);
+    private static readonly Color GlassOpen = Color.FromArgb(0xAE, 0x0E, 0x0E, 0x12);
     private float _lastVolume = -1;
 
     // ---- state ------------------------------------------------------------
@@ -93,6 +100,11 @@ public partial class NotchWindow : Window
         foreach (var fx in new[] { NotchGlowFx, LiveGlowFx, HoldGlowFx, PeekGlowFx, ArtGlowFx, ProgGlowFx, DropGlowFx, HudGlowFx, HudBarGlowFx, Eyes.Glow })
             _theme.RegisterGlow(fx);
         _hudTimer.Tick += (_, _) => { _hudTimer.Stop(); HideHud(); };
+        Notch.Background = _glass;
+        EarL.Fill = _glass;
+        EarR.Fill = _glass;
+        _theme.Changed += (c, ms) => Eyes.SetIris(c, ms);
+        Eyes.Interacted += () => _hoverIntent.Stop();
 
         _kSung.Color = AccentTheme.Lighter(AccentTheme.Default, 0.35);
         _karaoke = new LinearGradientBrush(new GradientStopCollection
@@ -113,7 +125,14 @@ public partial class NotchWindow : Window
 
         _collapseTimer.Interval = TimeSpan.FromSeconds(_settings.CollapseDelaySec);
         _collapseTimer.Tick += (_, _) => { _collapseTimer.Stop(); if (!Notch.IsMouseOver) Collapse(); };
-        _hoverIntent.Tick += (_, _) => { _hoverIntent.Stop(); if (Notch.IsMouseOver) Expand(); };
+        _hoverIntent.Tick += (_, _) =>
+        {
+            _hoverIntent.Stop();
+            if (!Notch.IsMouseOver) return;
+            // hovering / poking the eyes plays with them instead of opening the notch
+            if (Eyes.IsMouseOver && _mode == Mode.Collapsed) { _hoverIntent.Start(); return; }
+            Expand();
+        };
         _peekTimer.Tick += (_, _) => { _peekTimer.Stop(); EndPeek(); };
         _clock.Tick += (_, _) => OnTick();
         _countdownTimer.Tick += (_, _) => OnCountdownTick();
@@ -138,6 +157,7 @@ public partial class NotchWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
         PositionWindow();
+        if (App.SnapshotDir == null) SetBlur(true);
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
     }
@@ -161,6 +181,12 @@ public partial class NotchWindow : Window
         var drop = new TranslateTransform(0, -40);
         NotchHost.RenderTransform = drop;
         Motion.To(drop, TranslateTransform.YProperty, 0, 700, Motion.Spring(0.4), 150);
+        // keep the blur region glued to the island while it drops in
+        EventHandler follow = (_, _) => UpdateRegion();
+        CompositionTarget.Rendering += follow;
+        var stopFollow = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
+        stopFollow.Tick += (_, _) => { stopFollow.Stop(); CompositionTarget.Rendering -= follow; UpdateRegion(); };
+        stopFollow.Start();
 
         _media.Changed += OnMediaChanged;
         try { await _media.InitAsync(); }
@@ -216,8 +242,21 @@ public partial class NotchWindow : Window
             await Task.Delay(900); Save("1d-hud-wifi");
             HideHud(); Eyes.Express(EyeMood.Neutral, 10);
             await Task.Delay(800);
-            ShowPeek("Ana", "WhatsApp  ·  See you at 7?", null, "", media: false, ms: 60000);
+            ShowPeek("Ana", "See you at 7? 🍕", AppIconFor("explorer"), "", media: false, ms: 60000, app: "WhatsApp  ·  now");
             await Task.Delay(1200); Save("1e-notification");
+            ShowCharge(true, 79);
+            await Task.Delay(1500); Save("1f-charging");
+            ShowCharge(false, 79);
+            await Task.Delay(1400); Save("1g-unplugged");
+            ShowDevice(new DeviceEvent(true, "SanDisk Ultra", "USB drive", ""));
+            await Task.Delay(1300); Save("1h-usb");
+            EndPeek();
+            await Task.Delay(900);
+            Eyes.Express(EyeMood.Love, 60000);
+            await Task.Delay(800); Save("1i-eyes-love");
+            Eyes.Express(EyeMood.Sleepy, 60000);
+            await Task.Delay(800); Save("1j-eyes-sleepy");
+            Eyes.Express(EyeMood.Neutral, 10);
             _theme.Set(Color.FromRgb(0xFF, 0x5E, 0x9A), 1);
             ShowPeek("Blinding Lights", "The Weeknd  ·  Spotify", null, "", media: true, ms: 60000);
             PeekEq.IsPlaying = true;
@@ -250,6 +289,8 @@ public partial class NotchWindow : Window
         _volume.Dispose();
         _brightness.Dispose();
         _notifications.Dispose();
+        _devices.Dispose();
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
     }
 
     // =======================================================================
@@ -281,6 +322,19 @@ public partial class NotchWindow : Window
             _notifications.Start();
         }
         catch (Exception ex) { App.Log("notifications: " + ex.Message); }
+        try
+        {
+            _devices.Changed += d => Dispatcher.BeginInvoke(() => ShowDevice(d));
+            _devices.Start();
+        }
+        catch (Exception ex) { App.Log("devices: " + ex.Message); }
+        // charger plugged / unplugged → react instantly instead of waiting for the next battery poll
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.StatusChange) Dispatcher.BeginInvoke(UpdateBattery);
     }
 
     private void OnVolume(float level, bool muted)
@@ -326,11 +380,165 @@ public partial class NotchWindow : Window
         Eyes.Express(EyeMood.Surprised, 700);
         Eyes.Attend(4, 0, 700);
         var head = string.IsNullOrWhiteSpace(title) ? app : title;
-        var sub = string.Join("  ·  ", new[] { app, body }.Where(s => !string.IsNullOrWhiteSpace(s) && s != head));
+        var sub = string.IsNullOrWhiteSpace(body) || body == head ? "" : body;
+        var icon = AppIconFor(app);
+        var appLine = string.IsNullOrWhiteSpace(app) ? "Notification  ·  now" : $"{app}  ·  now";
         // let the eyes react first, then open the bubble
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(520) };
-        t.Tick += (_, _) => { t.Stop(); ShowPeek(head, sub, null, "", media: false, ms: 4800); };
+        t.Tick += (_, _) => { t.Stop(); ShowPeek(head, sub, icon, "\uEA8F", media: false, ms: 5200, app: appLine); };
         t.Start();
+    }
+
+    /// <summary>Finds the icon of the app that sent a notification (by matching a running process).</summary>
+    private static ImageSource? AppIconFor(string app)
+    {
+        if (string.IsNullOrWhiteSpace(app)) return null;
+        var key = new string(app.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        var session = System.Diagnostics.Process.GetCurrentProcess().SessionId;
+        foreach (var p in System.Diagnostics.Process.GetProcesses())
+        {
+            try
+            {
+                if (p.SessionId != session) continue;
+                var pn = p.ProcessName.ToLowerInvariant();
+                if (!(pn == key || (key.Length >= 4 && (pn.Contains(key) || key.Contains(pn) && pn.Length >= 4))))
+                {
+                    // fall back to the file description ("Google Chrome", "WhatsApp"…) only for windowed apps
+                    if (p.MainWindowHandle == IntPtr.Zero) continue;
+                    var d = p.MainModule?.FileVersionInfo.FileDescription ?? "";
+                    var dk = new string(d.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+                    if (dk != key && !(key.Length >= 4 && dk.Contains(key))) continue;
+                }
+                var path = p.MainModule?.FileName;
+                if (path == null) continue;
+                var large = new IntPtr[1];
+                if (Native.ExtractIconEx(path, 0, large, null, 1) > 0) return Native.IconToBitmap(large[0], true);
+            }
+            catch { /* protected / exited process */ }
+            finally { p.Dispose(); }
+        }
+        return null;
+    }
+
+    // =======================================================================
+    //  Power: charger plugged / unplugged
+    // =======================================================================
+    private void ShowCharge(bool charging, int pct)
+    {
+        Eyes.Express(charging ? EyeMood.Love : EyeMood.Surprised, 1800);
+        Eyes.Jump(1.15);
+        var green = Color.FromRgb(0x30, 0xD1, 0x58);
+        ChargeTitle.Text = charging ? "Charging" : "On battery";
+        if (charging) ChargeSub.Text = "Power adapter connected";
+        else
+        {
+            var s = PowerService.SecondsLeft();
+            ChargeSub.Text = s > 0 ? $"About {(s / 3600 > 0 ? $"{s / 3600} h " : "")}{s % 3600 / 60} min left" : "Running on battery power";
+        }
+        ChargePct.Foreground = new SolidColorBrush(charging ? Color.FromRgb(0x5E, 0xE0, 0x82) : pct <= 20 ? Color.FromRgb(0xFF, 0x5A, 0x4F) : Color.FromRgb(0xF5, 0xF5, 0xF7));
+        ChargeFill.Background = new SolidColorBrush(charging ? green : pct <= 20 ? Color.FromRgb(0xFF, 0x45, 0x3A)
+            : pct <= 35 ? Color.FromRgb(0xFF, 0xB0, 0x20) : Color.FromRgb(0xF2, 0xF4, 0xF7));
+        _peekIsMedia = false;
+        if (!ShowCard(ChargeView, 372, 70, 3600)) return;
+
+        const double fillMax = 44 - 2 * 1.4 - 2 * 2.4;
+        var target = Math.Max(3, fillMax * pct / 100.0);
+        if (charging)
+        {
+            // battery fills up from empty, the bolt bursts in, rings ripple out, the number counts up
+            ChargeFill.BeginAnimation(WidthProperty, new DoubleAnimation(0, target, TimeSpan.FromMilliseconds(1100))
+            { BeginTime = TimeSpan.FromMilliseconds(180), EasingFunction = Motion.OutQuint });
+            ChargeBolt.BeginAnimation(OpacityProperty, null);
+            ChargeBolt.Opacity = 1;
+            ChargeBoltScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            ChargeBoltScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            Motion.Pop(ChargeBoltScale, 0, 1, 700, 0.9);
+            ChargeBoltFx.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty,
+                new DoubleAnimation(0.2, 1, TimeSpan.FromMilliseconds(600)) { AutoReverse = true, RepeatBehavior = new RepeatBehavior(3) });
+            foreach (var (ring, scale, delay) in new[] { (ChargeRing1, ChargeRing1Scale, 250), (ChargeRing2, ChargeRing2Scale, 650) })
+            {
+                ring.Stroke = new SolidColorBrush(green);
+                var grow = new DoubleAnimation(0.7, 2.1, TimeSpan.FromMilliseconds(1100))
+                { BeginTime = TimeSpan.FromMilliseconds(delay), EasingFunction = Motion.Out, RepeatBehavior = new RepeatBehavior(2) };
+                scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+                scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+                ring.BeginAnimation(OpacityProperty, new DoubleAnimation(0.9, 0, TimeSpan.FromMilliseconds(1100))
+                { BeginTime = TimeSpan.FromMilliseconds(delay), RepeatBehavior = new RepeatBehavior(2) });
+            }
+            CountUp(ChargePct, Math.Max(0, pct - 25), pct, 1100);
+        }
+        else
+        {
+            // unplugged: the bolt shrinks away, the level settles down from full, no ripples
+            ChargeFill.BeginAnimation(WidthProperty, new DoubleAnimation(fillMax, target, TimeSpan.FromMilliseconds(900))
+            { BeginTime = TimeSpan.FromMilliseconds(250), EasingFunction = Motion.Out });
+            var shrink = new DoubleAnimation(1, 0.2, TimeSpan.FromMilliseconds(420)) { EasingFunction = new BackEase { EasingMode = EasingMode.EaseIn, Amplitude = 0.6 } };
+            ChargeBoltScale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
+            ChargeBoltScale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
+            ChargeBolt.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(420)));
+            ChargeBoltFx.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty, null);
+            foreach (var r in new[] { ChargeRing1, ChargeRing2 }) { r.BeginAnimation(OpacityProperty, null); r.Opacity = 0; }
+            ChargePct.Text = $"{pct}%";
+            Motion.SlideIn(ChargePct, 8, 400, 200);
+        }
+    }
+
+    private static void CountUp(TextBlock tb, int from, int to, int ms)
+    {
+        var start = DateTime.Now;
+        tb.Text = $"{from}%";
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+        t.Tick += (_, _) =>
+        {
+            var k = Math.Min(1, (DateTime.Now - start).TotalMilliseconds / ms);
+            tb.Text = $"{(int)Math.Round(from + (to - from) * (1 - Math.Pow(1 - k, 3)))}%";
+            if (k >= 1) t.Stop();
+        };
+        t.Start();
+    }
+
+    // =======================================================================
+    //  Devices: USB drive / phone / headset … plugged in or removed
+    // =======================================================================
+    private void ShowDevice(DeviceEvent d)
+    {
+        var accent = d.Connected ? Color.FromRgb(0x5A, 0xB0, 0xFF) : Color.FromRgb(0x9A, 0x9A, 0xA2);
+        DeviceGlyph.Text = d.Glyph;
+        DeviceGlyph.Foreground = new SolidColorBrush(accent);
+        DeviceTitle.Text = d.Connected ? "Connected" : "Disconnected";
+        DeviceSub.Text = d.Name;
+        DeviceBadgeText.Text = d.Kind;
+        DeviceBadgeText.Foreground = DeviceGlyph.Foreground;
+        DeviceBadge.Background = new SolidColorBrush(d.Connected ? Color.FromArgb(0x26, 0x0A, 0x84, 0xFF) : Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF));
+        _peekIsMedia = false;
+        Eyes.Express(d.Connected ? EyeMood.Happy : EyeMood.Sad, 1600);
+        if (!ShowCard(DeviceView, 372, 70, 3000)) return;
+
+        if (d.Connected)
+        {
+            // the cable slides in, then the icon "plugs" in with a spark
+            DeviceCable.BeginAnimation(WidthProperty, new DoubleAnimation(0, 24, TimeSpan.FromMilliseconds(380)) { EasingFunction = Motion.Out });
+            DeviceIconX.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(-30, 0, TimeSpan.FromMilliseconds(620))
+            { BeginTime = TimeSpan.FromMilliseconds(120), EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut } });
+            DeviceIconBox.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(260)) { BeginTime = TimeSpan.FromMilliseconds(120) });
+            var spark = new DoubleAnimationUsingKeyFrames();
+            spark.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(430))));
+            spark.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(500))));
+            spark.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(900))));
+            DeviceSpark.BeginAnimation(OpacityProperty, spark);
+            Motion.Pop(DeviceSparkScale, 0.3, 1.8, 900, 0.2);
+        }
+        else
+        {
+            // removed: the icon pops out to the right and dims, the cable retracts
+            DeviceCable.BeginAnimation(WidthProperty, new DoubleAnimation(24, 0, TimeSpan.FromMilliseconds(420)) { BeginTime = TimeSpan.FromMilliseconds(250) });
+            DeviceIconX.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, 10, TimeSpan.FromMilliseconds(500))
+            { EasingFunction = new BackEase { Amplitude = 0.6, EasingMode = EasingMode.EaseIn } });
+            DeviceIconBox.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.45, TimeSpan.FromMilliseconds(500)));
+            DeviceSpark.BeginAnimation(OpacityProperty, null);
+            DeviceSpark.Opacity = 0;
+        }
+        Motion.SlideIn(DeviceTitle, 8, 360, 160);
     }
 
     /// <summary>Volume / brightness / network: icon + label on the left, bar + value on the right, eyes in the middle.</summary>
@@ -487,7 +695,34 @@ public partial class NotchWindow : Window
         }
         g.Freeze();
         NotchContent.Clip = g;
+        UpdateRegion();
     }
+
+    // =======================================================================
+    //  Frosted backdrop: acrylic blur clipped to the island's outline
+    // =======================================================================
+    private void SetBlur(bool on)
+    {
+        if (_hwnd == IntPtr.Zero || on == _blurOn) return;
+        _blurOn = on;
+        try { Backdrop.SetBlur(_hwnd, on, 0x12000000); } catch (Exception ex) { App.Log("blur: " + ex.Message); }
+        UpdateRegion();
+    }
+
+    private void UpdateRegion()
+    {
+        if (_hwnd == IntPtr.Zero || App.SnapshotDir != null || !IsLoaded) return;
+        double w = Notch.ActualWidth, h = Notch.ActualHeight;
+        if (w <= 0 || h <= 0) return;
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var p = Notch.TranslatePoint(new Point(0, 0), Root);
+        var r = Math.Min(NotchRadius, Math.Min(w, h) / 2);
+        Backdrop.SetShape(_hwnd, p.X * dpi.DpiScaleX, p.Y * dpi.DpiScaleY, w * dpi.DpiScaleX, h * dpi.DpiScaleY,
+            r * dpi.DpiScaleX, 12 * dpi.DpiScaleX);
+    }
+
+    private void SetGlass(Mode mode) => Motion.Color(_glass, SolidColorBrush.ColorProperty,
+        mode switch { Mode.Expanded => GlassOpen, Mode.Peek => GlassPeek, _ => GlassCollapsed }, 380);
 
     // =======================================================================
     //  Expand / peek / collapse
@@ -517,6 +752,8 @@ public partial class NotchWindow : Window
         _mode = Mode.Expanded;
         _peekTimer.Stop();
         _collapseTimer.Stop();
+        SetGlass(Mode.Expanded);
+        SetBlur(true);
         Motion.To(NotchHost, OpacityProperty, 1, 150);
 
         if (TabApps.IsChecked == true) RefreshApps();
@@ -524,7 +761,7 @@ public partial class NotchWindow : Window
 
         Morph(ExpandedW, ExpandedHeight, ExpandedRadius, 560, 0.32);
         Motion.Hide(CollapsedView, 110);
-        if (wasPeek) Motion.Hide(PeekView, 110);
+        if (wasPeek && _card != null) { Motion.Hide(_card, 110); _card = null; }
         ExpandedView.Opacity = 0;
         Motion.Show(ExpandedView, 320, 150, blur: 14, fromY: -12);
 
@@ -547,6 +784,7 @@ public partial class NotchWindow : Window
     {
         if (!Expanded || _countdown > 0 || _draggingOut) return;
         _mode = Mode.Collapsed;
+        SetGlass(Mode.Collapsed);
         Motion.Hide(ExpandedView, 130, blur: 12);
         Motion.To(Ambient, OpacityProperty, 0, 220, done: () => { if (!Expanded) SetAmbientDrift(false); });
         Motion.To(Rim, OpacityProperty, 0, 200);
@@ -558,46 +796,67 @@ public partial class NotchWindow : Window
         ApplyCollapsed(animate: true);
     }
 
-    private void ShowPeek(string title, string sub, ImageSource? art, string glyph, bool media, int ms = 3200)
+    private void ShowPeek(string title, string sub, ImageSource? art, string glyph, bool media, int ms = 3200, string app = "")
     {
         if (Expanded || _countdown > 0) return;
+        var same = _mode == Mode.Peek && _card == PeekView;
         PeekTitle.Text = title;
         PeekSub.Text = sub;
+        PeekApp.Text = app;
+        PeekApp.Visibility = app.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         PeekArtBrush.ImageSource = art;
+        PeekArtBrush.Stretch = media ? Stretch.UniformToFill : Stretch.Uniform;
+        PeekArt.Margin = new Thickness(media ? 0 : 8);
         PeekArt.Visibility = art != null ? Visibility.Visible : Visibility.Collapsed;
         PeekGlyph.Text = glyph;
         PeekEq.Visibility = media ? Visibility.Visible : Visibility.Collapsed;
         PeekEq.IsPlaying = media && _media.Current?.IsPlaying == true;
         _peekIsMedia = media;
 
+        ShowCard(PeekView, PeekW, app.Length > 0 ? PeekH + 10 : PeekH, ms);
+        if (same) Motion.SlideIn(PeekText, 10);
+        Motion.Pop(PeekArtScale, 0.5, 1, 600, 0.7);
+    }
+
+    /// <summary>Opens the island as a pop-up card (notification, track, power, device) for <paramref name="ms"/>.</summary>
+    private bool ShowCard(UIElement view, double w, double h, int ms)
+    {
+        if (Expanded || _countdown > 0) return false;
+        if (_hudShown) { _hudTimer.Stop(); _hudShown = false; HudLeft.Visibility = HudRight.Visibility = Visibility.Collapsed; MiniLeft.Visibility = MiniRight.Visibility = Visibility.Visible; MiniLeft.Opacity = MiniRight.Opacity = 1; }
         if (_mode != Mode.Peek)
         {
             _mode = Mode.Peek;
+            SetGlass(Mode.Peek);
+            SetBlur(true);
             Motion.Hide(CollapsedView, 110);
-            PeekView.Opacity = 0;
-            Motion.Show(PeekView, 300, 140, blur: 12);
             Motion.To(Rim, OpacityProperty, 1, 300);
             Motion.To(NotchShadow, OpacityProperty, 1, 300);
-            Motion.To(NotchGlow, OpacityProperty, 0.6, 500);
             Motion.To(LiveGlowHost, OpacityProperty, 0, 150);
             _liveGlowTarget = -1;
             Motion.To(NotchHost, OpacityProperty, 1, 150);
         }
-        else Motion.SlideIn(PeekText, 10);
-
-        Motion.Pop(PeekArtScale, 0.5, 1, 600, 0.7);
+        if (_card != view)
+        {
+            if (_card != null) Motion.Hide(_card, 110);
+            view.Opacity = 0;
+            Motion.Show(view, 300, 140, blur: 12);
+            _card = view;
+        }
         _targetW = _targetH = -1;
-        Morph(PeekW, PeekH, PeekRadius, 540, 0.38);
+        Morph(w, h, PeekRadius, 540, 0.38);
         _peekTimer.Interval = TimeSpan.FromMilliseconds(ms);
         _peekTimer.Stop();
         _peekTimer.Start();
+        return true;
     }
 
     private void EndPeek()
     {
         if (_mode != Mode.Peek) return;
         _mode = Mode.Collapsed;
-        Motion.Hide(PeekView, 130, blur: 10);
+        SetGlass(Mode.Collapsed);
+        if (_card != null) Motion.Hide(_card, 130, blur: 10);
+        _card = null;
         Motion.To(Rim, OpacityProperty, 0, 200);
         Motion.To(NotchShadow, OpacityProperty, 0, 250);
         Motion.To(NotchGlow, OpacityProperty, 0, 250);
@@ -674,6 +933,7 @@ public partial class NotchWindow : Window
         // 0.02 instead of 0 keeps the pixels hit-testable so hovering still opens it.
         var target = full && !Notch.IsMouseOver ? 0.02 : 1;
         if (Math.Abs(NotchHost.Opacity - target) > 0.01) Motion.To(NotchHost, OpacityProperty, target, 350);
+        SetBlur(target > 0.5);   // no frosted rectangle floating over fullscreen video
     }
 
     // =======================================================================
@@ -700,9 +960,7 @@ public partial class NotchWindow : Window
             Eyes.Express(charging ? EyeMood.Love : EyeMood.Surprised, 1800);
             Eyes.Jump(1.15);
         }
-        if (has && _lastCharging.HasValue && _lastCharging != charging)
-            ShowPeek(charging ? "Charging" : "On battery", $"{pct}%  ·  {(charging ? "plugged in" : "unplugged")}", null,
-                charging ? "" : "", media: false, ms: 2600);
+        if (has && _lastCharging.HasValue && _lastCharging != charging) ShowCharge(charging, pct);
         _lastCharging = has ? charging : null;
     }
 

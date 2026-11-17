@@ -17,9 +17,30 @@ that expands on hover into a control center.
 
 ### The eyes
 
-The eyes blink, glance around, follow your mouse when it comes near the top of the screen, and pull faces:
-happy `^ ^` (connected, max volume), surprised (notification, unplugged), hearts (charger plugged in),
-sleepy (muted, very dim screen, battery ≤ 15 %) and sad (internet lost). They take on the artwork colour's glow.
+Little 3D eyes: shaded eyeballs, a coloured iris (it takes the artwork colour) that slides and foreshortens as they look
+around, a fixed light reflection and real eyelids. They blink, glance around, follow your mouse near the top of the
+screen and bob to the music. Play with them:
+
+- **Hover** them and they stare back with bigger pupils and a blush; hovering the eyes doesn't open the notch.
+- **Click** pokes them: they squeeze shut and wiggle. Poke four times quickly and they get **angry**.
+- **Double-click** makes them **wink** with heart eyes.
+
+Faces: happy (connected, max volume, device plugged in), surprised (notification, unplugged), hearts (charger plugged in),
+sleepy (muted, very dim screen, battery ≤ 15 %) and sad (internet lost, device removed).
+
+![](docs/screenshots/eyes-zoom.png)
+
+### Look
+
+The island has a real **frosted-glass backdrop**: Windows acrylic blur clipped to the exact notch shape. It's solid black
+while small and frosted when open. Gradients are kept to a minimum: flat colours, glass tiles and soft glows.
+
+### Plug-in animations
+
+| Charger plugged in | Charger unplugged | USB / device |
+|---|---|---|
+| ![](docs/screenshots/1f-charging.png) | ![](docs/screenshots/1g-unplugged.png) | ![](docs/screenshots/1h-usb.png) |
+| The battery fills, the bolt bursts in, green rings ripple and the % counts up | The bolt shrinks away, the level settles and the time left is shown | A cable slides in, the icon plugs in with a spark and a badge shows the type (drive, phone, audio, keyboard, mouse, camera…). Removing it slides the icon out |
 
 | Idle | Happy | Volume | Wi-Fi | Notification |
 |---|---|---|---|---|

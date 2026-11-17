@@ -110,7 +110,7 @@
 
         <StackPanel x:Name="NotchHost" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Top">
             <!-- concave "ears" that melt the island into the top edge of the screen -->
-            <Path Data="M0,0 L12,0 L12,12 A12,12 0 0 0 0,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
+            <Path x:Name="EarL" Data="M0,0 L12,0 L12,12 A12,12 0 0 0 0,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
 
             <Border x:Name="Notch" Width="230" Height="32" Background="{StaticResource NotchFill}" CornerRadius="0,0,16,16"
                     AllowDrop="True"
@@ -120,8 +120,8 @@
 
                     <!-- ===== ambient backdrop: blurred, slowly drifting artwork ===== -->
                     <Grid x:Name="Ambient" Opacity="0" IsHitTestVisible="False">
-                        <Rectangle Fill="{DynamicResource AccentAurora}"/>
-                        <Image x:Name="AmbientImage" Stretch="UniformToFill" Opacity="0.55" RenderTransformOrigin="0.5,0.5">
+                        
+                        <Image x:Name="AmbientImage" Stretch="UniformToFill" Opacity="0.28" RenderTransformOrigin="0.5,0.5">
                             <Image.RenderTransform>
                                 <TransformGroup>
                                     <ScaleTransform x:Name="AmbientScale" ScaleX="1.4" ScaleY="1.4"/>
@@ -130,15 +130,7 @@
                             </Image.RenderTransform>
                             <Image.Effect><BlurEffect Radius="70" RenderingBias="Performance"/></Image.Effect>
                         </Image>
-                        <Rectangle>
-                            <Rectangle.Fill>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                    <GradientStop Color="#D9000000" Offset="0"/>
-                                    <GradientStop Color="#99000000" Offset="0.45"/>
-                                    <GradientStop Color="#CC000000" Offset="1"/>
-                                </LinearGradientBrush>
-                            </Rectangle.Fill>
-                        </Rectangle>
+                        <Rectangle Fill="#33000000"/>
                     </Grid>
 
                     <!-- hairline rim -->
@@ -167,14 +159,14 @@
                             </Grid.ColumnDefinitions>
 
                             <!-- the little face in the middle -->
-                            <ui:NotchEyes x:Name="Eyes" Grid.Column="1" Margin="10,0" VerticalAlignment="Center"/>
+                            <ui:NotchEyes x:Name="Eyes" Grid.Column="1" Margin="2,0" VerticalAlignment="Center"/>
 
                             <!-- HUD: volume / brightness / network (replaces the side content for a moment) -->
                             <StackPanel x:Name="HudLeft" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
-                                <Border x:Name="HudIconBox" Width="20" Height="20" CornerRadius="7" Background="{DynamicResource AccentGradient}" RenderTransformOrigin="0.5,0.5">
+                                <Border x:Name="HudIconBox" Width="20" Height="20" CornerRadius="7" Background="#24FFFFFF" BorderBrush="#1FFFFFFF" BorderThickness="1" RenderTransformOrigin="0.5,0.5">
                                     <Border.RenderTransform><ScaleTransform x:Name="HudIconScale"/></Border.RenderTransform>
-                                    <Border.Effect><DropShadowEffect x:Name="HudGlowFx" BlurRadius="12" ShadowDepth="0" Opacity="0.7"/></Border.Effect>
-                                    <TextBlock x:Name="HudIcon" Style="{StaticResource Glyph}" FontSize="11" Foreground="#E6000000"/>
+                                    <Border.Effect><DropShadowEffect x:Name="HudGlowFx" BlurRadius="10" ShadowDepth="0" Opacity="0"/></Border.Effect>
+                                    <TextBlock x:Name="HudIcon" Style="{StaticResource Glyph}" FontSize="11" Foreground="{StaticResource Fg}"/>
                                 </Border>
                                 <TextBlock x:Name="HudLabel" FontSize="12" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis" MaxWidth="108"/>
@@ -236,19 +228,90 @@
                         </Grid.ColumnDefinitions>
                         <Grid Width="44" Height="44" RenderTransformOrigin="0.5,0.5">
                             <Grid.RenderTransform><ScaleTransform x:Name="PeekArtScale"/></Grid.RenderTransform>
-                            <Border CornerRadius="12" Background="{DynamicResource AccentGradient}">
-                                <Border.Effect><DropShadowEffect x:Name="PeekGlowFx" BlurRadius="22" ShadowDepth="0" Opacity="0.7"/></Border.Effect>
-                                <TextBlock x:Name="PeekGlyph" Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="18" Foreground="#E6000000"/>
+                            <Border CornerRadius="12" Background="#1FFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                <Border.Effect><DropShadowEffect x:Name="PeekGlowFx" BlurRadius="16" ShadowDepth="0" Opacity="0"/></Border.Effect>
+                                <TextBlock x:Name="PeekGlyph" Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="18" Foreground="{StaticResource Fg}"/>
                             </Border>
                             <Border x:Name="PeekArt" CornerRadius="12">
                                 <Border.Background><ImageBrush x:Name="PeekArtBrush" Stretch="UniformToFill"/></Border.Background>
                             </Border>
                         </Grid>
                         <StackPanel x:Name="PeekText" Grid.Column="1" Margin="12,0,10,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="PeekApp" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource FgFaint}" Margin="0,0,0,1"
+                                       TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
                             <TextBlock x:Name="PeekTitle" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                             <TextBlock x:Name="PeekSub" FontSize="11.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                         </StackPanel>
                         <ui:EqualizerBars x:Name="PeekEq" Grid.Column="2" BarHeight="18" BarWidth="3.5"/>
+                    </Grid>
+
+                    <!-- ===================== POWER (charger plugged / unplugged) ===================== -->
+                    <Grid x:Name="ChargeView" Opacity="0" Visibility="Collapsed" Margin="14,10,20,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="66" Height="46">
+                            <!-- ripples -->
+                            <Ellipse x:Name="ChargeRing1" Width="38" Height="38" Stroke="#FF30D158" StrokeThickness="1.4" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform><ScaleTransform x:Name="ChargeRing1Scale"/></Ellipse.RenderTransform>
+                            </Ellipse>
+                            <Ellipse x:Name="ChargeRing2" Width="38" Height="38" Stroke="#FF30D158" StrokeThickness="1.4" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform><ScaleTransform x:Name="ChargeRing2Scale"/></Ellipse.RenderTransform>
+                            </Ellipse>
+                            <!-- battery -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Width="44" Height="22" CornerRadius="6.5" BorderBrush="#99FFFFFF" BorderThickness="1.4" Background="#14FFFFFF">
+                                    <Border x:Name="ChargeFill" HorizontalAlignment="Left" Margin="2.4" CornerRadius="4" Width="0" Background="#FF30D158"/>
+                                </Border>
+                                <Border Width="2.6" Height="8" CornerRadius="0,1.5,1.5,0" Background="#99FFFFFF" Margin="1.2,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Path x:Name="ChargeBolt" Data="M 5.6,0 L 0.6,6.6 L 3.9,6.6 L 3.1,11 L 8.2,4.2 L 4.8,4.2 Z" Stretch="Uniform"
+                                  Width="11" Height="16" Fill="White" Stroke="#CC0B3D1C" StrokeThickness="1" Margin="0,0,3,0"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform><ScaleTransform x:Name="ChargeBoltScale"/></Path.RenderTransform>
+                                <Path.Effect><DropShadowEffect x:Name="ChargeBoltFx" BlurRadius="10" ShadowDepth="0" Color="#FF30D158" Opacity="0.9"/></Path.Effect>
+                            </Path>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="ChargeTitle" Text="Charging" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="ChargeSub" FontSize="11.5" Foreground="{StaticResource FgDim}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <TextBlock x:Name="ChargePct" Grid.Column="2" FontFamily="Segoe UI Variable Display, Segoe UI" FontSize="24" FontWeight="SemiBold"
+                                   Foreground="#FF5EE082" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <!-- ===================== DEVICE (USB / phone / headset… connected or removed) ===================== -->
+                    <Grid x:Name="DeviceView" Opacity="0" Visibility="Collapsed" Margin="10,10,18,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="62" Height="46" ClipToBounds="True">
+                            <Rectangle x:Name="DeviceCable" Height="3" Width="0" RadiusX="1.5" RadiusY="1.5" Fill="#59FFFFFF"
+                                       HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                            <Ellipse x:Name="DeviceSpark" Width="16" Height="16" Opacity="0" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                     Margin="11,0,0,0" RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush><GradientStop Color="#FFFFFFFF" Offset="0"/><GradientStop Color="#004DA3FF" Offset="1"/></RadialGradientBrush>
+                                </Ellipse.Fill>
+                                <Ellipse.RenderTransform><ScaleTransform x:Name="DeviceSparkScale"/></Ellipse.RenderTransform>
+                            </Ellipse>
+                            <Border x:Name="DeviceIconBox" Width="42" Height="42" CornerRadius="13" HorizontalAlignment="Right"
+                                    Background="#1FFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                <Border.RenderTransform><TranslateTransform x:Name="DeviceIconX"/></Border.RenderTransform>
+                                <TextBlock x:Name="DeviceGlyph" Style="{StaticResource Glyph}" FontSize="18" Foreground="#FF5AB0FF"/>
+                            </Border>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="DeviceTitle" FontSize="13.5" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="DeviceSub" FontSize="11.5" Foreground="{StaticResource FgDim}" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Border x:Name="DeviceBadge" Grid.Column="2" CornerRadius="9" Padding="9,3" Background="#260A84FF" VerticalAlignment="Center">
+                            <TextBlock x:Name="DeviceBadgeText" FontSize="10.5" FontWeight="SemiBold" Foreground="#FF5AB0FF"/>
+                        </Border>
                     </Grid>
 
                     <!-- ===================== EXPANDED ===================== -->
@@ -488,7 +551,7 @@
                                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                                     <Grid Width="50" Height="50">
                                         <Ellipse Fill="{StaticResource GradSleep}">
-                                            <Ellipse.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#FFBF5AF2" Opacity="0.6"/></Ellipse.Effect>
+                                            <Ellipse.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#FFBF5AF2" Opacity="0.18"/></Ellipse.Effect>
                                         </Ellipse>
                                         <TextBlock Style="{StaticResource Glyph}" Text="&#xE896;" FontSize="20"/>
                                     </Grid>
@@ -535,25 +598,25 @@
                             <UniformGrid Columns="4">
                                 <Button Style="{StaticResource TileButton}" Margin="0,0,6,0" Click="Lock_Click" ToolTip="Lock — or close your hand ✊ near the camera">
                                     <StackPanel>
-                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradLock}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FF40A0FF" Opacity="0.6"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="15"/></Grid>
+                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradLock}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FF40A0FF" Opacity="0.18"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="15"/></Grid>
                                         <TextBlock Text="Lock" FontSize="11.5" FontWeight="SemiBold" Margin="0,8,0,0" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource TileButton}" Margin="3,0,3,0" Click="Sleep_Click" ToolTip="Sleep">
                                     <StackPanel>
-                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradSleep}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFBF5AF2" Opacity="0.6"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE708;" FontSize="15"/></Grid>
+                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradSleep}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFBF5AF2" Opacity="0.18"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE708;" FontSize="15"/></Grid>
                                         <TextBlock Text="Sleep" FontSize="11.5" FontWeight="SemiBold" Margin="0,8,0,0" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource TileButton}" Margin="3,0,3,0" Click="Restart_Click" ToolTip="Restart — or raise an open hand 🖐 near the camera">
                                     <StackPanel>
-                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradRestart}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFFF9F0A" Opacity="0.6"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE72C;" FontSize="15"/></Grid>
+                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradRestart}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFFF9F0A" Opacity="0.18"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE72C;" FontSize="15"/></Grid>
                                         <TextBlock Text="Restart" FontSize="11.5" FontWeight="SemiBold" Margin="0,8,0,0" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource TileButton}" Margin="6,0,0,0" Click="Shutdown_Click" ToolTip="Shut down">
                                     <StackPanel>
-                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradPower}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFFF453A" Opacity="0.6"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE7E8;" FontSize="15"/></Grid>
+                                        <Grid Width="36" Height="36"><Ellipse Fill="{StaticResource GradPower}"><Ellipse.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Color="#FFFF453A" Opacity="0.18"/></Ellipse.Effect></Ellipse><TextBlock Style="{StaticResource Glyph}" Text="&#xE7E8;" FontSize="15"/></Grid>
                                         <TextBlock Text="Shut down" FontSize="11.5" FontWeight="SemiBold" Margin="0,8,0,0" HorizontalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
@@ -649,7 +712,7 @@
                 </Grid>
             </Border>
 
-            <Path Data="M12,0 L0,0 L0,12 A12,12 0 0 1 12,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
+            <Path x:Name="EarR" Data="M12,0 L0,0 L0,12 A12,12 0 0 1 12,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
         </StackPanel>
     </Grid>
 </Window>

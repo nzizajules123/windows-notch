@@ -24,12 +24,12 @@ public sealed class AccentTheme
         _soft = new SolidColorBrush(WithAlpha(Default, 0x40));
         _faint = new SolidColorBrush(WithAlpha(Default, 0x1C));
 
-        _vTop = new GradientStop(Lighter(Default, 0.45), 0);
+        _vTop = new GradientStop(Lighter(Default, 0.14), 0);
         _vBottom = new GradientStop(Default, 1);
         var vertical = new LinearGradientBrush(new GradientStopCollection { _vTop, _vBottom }, new Point(0, 0), new Point(0, 1));
 
         _hLeft = new GradientStop(Default, 0);
-        _hRight = new GradientStop(Lighter(Default, 0.4), 1);
+        _hRight = new GradientStop(Lighter(Default, 0.12), 1);
         var horizontal = new LinearGradientBrush(new GradientStopCollection { _hLeft, _hRight }, new Point(0, 0), new Point(1, 0));
 
         // thin glowing line: transparent → accent → transparent
@@ -72,10 +72,10 @@ public sealed class AccentTheme
         Motion.Color(_solid, SolidColorBrush.ColorProperty, c, ms);
         Motion.Color(_soft, SolidColorBrush.ColorProperty, WithAlpha(c, 0x40), ms);
         Motion.Color(_faint, SolidColorBrush.ColorProperty, WithAlpha(c, 0x1C), ms);
-        Motion.Color(_vTop, GradientStop.ColorProperty, Lighter(c, 0.45), ms);
+        Motion.Color(_vTop, GradientStop.ColorProperty, Lighter(c, 0.14), ms);
         Motion.Color(_vBottom, GradientStop.ColorProperty, c, ms);
         Motion.Color(_hLeft, GradientStop.ColorProperty, c, ms);
-        Motion.Color(_hRight, GradientStop.ColorProperty, Lighter(c, 0.4), ms);
+        Motion.Color(_hRight, GradientStop.ColorProperty, Lighter(c, 0.12), ms);
         Motion.Color(_lineMid, GradientStop.ColorProperty, c, ms);
         Motion.Color(_ambTop, GradientStop.ColorProperty, WithAlpha(c, 0x55), ms);
         foreach (var g in _glows) Motion.Color(g, DropShadowEffect.ColorProperty, c, ms);

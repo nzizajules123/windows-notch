@@ -13,6 +13,9 @@ public static class PowerService
         return (pct, s.ACLineStatus == 1, has);
     }
 
+    /// <summary>Estimated battery time left in seconds, or -1 when Windows hasn't estimated it yet.</summary>
+    public static int SecondsLeft() => Native.GetSystemPowerStatus(out var s) ? s.BatteryLifeTime : -1;
+
     public static void Lock() => Native.LockWorkStation();
     public static void Sleep() => Native.SetSuspendState(false, false, false);
     public static void Restart() => Run("shutdown", "/r /t 0");

@@ -15,11 +15,7 @@
         <!-- Accent, AccentSoft, AccentGradient, AccentGradientH, AccentLine, AccentAurora are created live by AccentTheme -->
 
         <!-- notch body: true black at the top edge (blends with the bezel), a breath of depth at the bottom -->
-        <LinearGradientBrush x:Key="NotchFill" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#FF000000" Offset="0"/>
-            <GradientStop Color="#FF000000" Offset="0.5"/>
-            <GradientStop Color="#FF0C0C10" Offset="1"/>
-        </LinearGradientBrush>
+        <SolidColorBrush x:Key="NotchFill" Color="#FF000000"/>
 
         <!-- hairline rim that only lights up towards the bottom of the island -->
         <LinearGradientBrush x:Key="RimStroke" StartPoint="0,0" EndPoint="0,1">
@@ -45,11 +41,11 @@
         </LinearGradientBrush>
 
         <!-- power tile icon gradients -->
-        <LinearGradientBrush x:Key="GradLock" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FF40A0FF" Offset="0"/><GradientStop Color="#FF5E5CE6" Offset="1"/></LinearGradientBrush>
-        <LinearGradientBrush x:Key="GradSleep" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FF7D7AFF" Offset="0"/><GradientStop Color="#FFBF5AF2" Offset="1"/></LinearGradientBrush>
-        <LinearGradientBrush x:Key="GradRestart" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFC23A" Offset="0"/><GradientStop Color="#FFFF7A00" Offset="1"/></LinearGradientBrush>
-        <LinearGradientBrush x:Key="GradPower" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFF6961" Offset="0"/><GradientStop Color="#FFD70015" Offset="1"/></LinearGradientBrush>
-        <LinearGradientBrush x:Key="GradCamera" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FF5BE37D" Offset="0"/><GradientStop Color="#FF1FAE6B" Offset="1"/></LinearGradientBrush>
+        <LinearGradientBrush x:Key="GradLock" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF3D8BFF" Offset="0"/><GradientStop Color="#FF3479EE" Offset="1"/></LinearGradientBrush>
+        <LinearGradientBrush x:Key="GradSleep" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF8F6CFF" Offset="0"/><GradientStop Color="#FF7D5CF0" Offset="1"/></LinearGradientBrush>
+        <LinearGradientBrush x:Key="GradRestart" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFFA42A" Offset="0"/><GradientStop Color="#FFF2921C" Offset="1"/></LinearGradientBrush>
+        <LinearGradientBrush x:Key="GradPower" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FFFF544A" Offset="0"/><GradientStop Color="#FFEC3B33" Offset="1"/></LinearGradientBrush>
+        <LinearGradientBrush x:Key="GradCamera" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF38CC5E" Offset="0"/><GradientStop Color="#FF2DB552" Offset="1"/></LinearGradientBrush>
 
         <Style x:Key="Glyph" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>

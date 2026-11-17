@@ -127,6 +127,91 @@ internal static class CtsExt
 }
 
 // =====================================================================================
+//  Devices — USB drives, phones, headsets, keyboards, mice… (WMI Win32_PnPEntity events)
+// =====================================================================================
+public sealed record DeviceEvent(bool Connected, string Name, string Kind, string Glyph);
+
+public sealed class DeviceWatcher : IDisposable
+{
+    private System.Management.ManagementEventWatcher? _watcher;
+    private readonly List<(bool add, string id, string name, string cls)> _batch = new();
+    private readonly object _lock = new();
+    private System.Threading.Timer? _flush;
+
+    public event Action<DeviceEvent>? Changed;
+
+    public void Start()
+    {
+        var q = new System.Management.WqlEventQuery(
+            "SELECT * FROM __InstanceOperationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_PnPEntity'");
+        _watcher = new System.Management.ManagementEventWatcher(q);
+        _watcher.EventArrived += (_, e) =>
+        {
+            try
+            {
+                var kind = e.NewEvent.ClassPath.ClassName;
+                if (kind != "__InstanceCreationEvent" && kind != "__InstanceDeletionEvent") return;
+                var t = (System.Management.ManagementBaseObject)e.NewEvent["TargetInstance"];
+                var id = t["DeviceID"]?.ToString() ?? "";
+                var name = t["Name"]?.ToString() ?? "";
+                var cls = t["PNPClass"]?.ToString() ?? "";
+                lock (_lock)
+                {
+                    _batch.Add((kind == "__InstanceCreationEvent", id, name, cls));
+                    _flush?.Dispose();
+                    _flush = new System.Threading.Timer(_ => Flush(), null, 1300, Timeout.Infinite);  // one plug = many entities
+                }
+            }
+            catch { }
+        };
+        _watcher.Start();
+    }
+
+    private static readonly (string cls, string kind, string glyph)[] Priority =
+    {
+        ("DiskDrive", "USB drive", ""), ("WPD", "Phone", ""), ("AudioEndpoint", "Audio", ""),
+        ("Media", "Audio", ""), ("Camera", "Camera", ""), ("Image", "Camera", ""),
+        ("Keyboard", "Keyboard", ""), ("Mouse", "Mouse", ""), ("Printer", "Printer", ""),
+        ("Bluetooth", "Bluetooth", ""), ("Net", "Network", ""), ("HIDClass", "Accessory", ""),
+        ("USB", "USB", ""),
+    };
+
+    private void Flush()
+    {
+        List<(bool add, string id, string name, string cls)> items;
+        lock (_lock) { items = _batch.ToList(); _batch.Clear(); }
+        foreach (var add in new[] { true, false })
+        {
+            var group = items.Where(i => i.add == add).ToList();
+            // only real plug-in hardware (not software devices that come and go)
+            if (!group.Any(i => i.id.StartsWith("USB", StringComparison.OrdinalIgnoreCase) || i.id.StartsWith("BTH", StringComparison.OrdinalIgnoreCase)
+                                || i.id.StartsWith("SWD\\WPDBUSENUM", StringComparison.OrdinalIgnoreCase))) continue;
+            foreach (var (cls, kind, glyph) in Priority)
+            {
+                var hit = group.FirstOrDefault(i => string.Equals(i.cls, cls, StringComparison.OrdinalIgnoreCase) && !Generic(i.name));
+                if (hit.name == null) continue;
+                App.Log($"device {(add ? "connected" : "removed")}: {hit.name} ({hit.cls})");
+                Changed?.Invoke(new DeviceEvent(add, Clean(hit.name), kind, glyph));
+                break;
+            }
+        }
+    }
+
+    private static bool Generic(string n) =>
+        string.IsNullOrWhiteSpace(n) || n.StartsWith("USB Composite", StringComparison.OrdinalIgnoreCase) ||
+        n.StartsWith("USB Root", StringComparison.OrdinalIgnoreCase) || n.StartsWith("Generic USB Hub", StringComparison.OrdinalIgnoreCase) ||
+        n.Contains("Input Device", StringComparison.OrdinalIgnoreCase) && !n.Contains("Keyboard") && !n.Contains("Mouse");
+
+    private static string Clean(string n) => System.Text.RegularExpressions.Regex.Replace(n, @"\s+USB Device$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+    public void Dispose()
+    {
+        try { _watcher?.Stop(); _watcher?.Dispose(); } catch { }
+        _flush?.Dispose();
+    }
+}
+
+// =====================================================================================
 //  Internet — WinRT NetworkInformation
 // =====================================================================================
 public sealed class NetworkWatcher
