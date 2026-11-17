@@ -202,7 +202,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border Background="Transparent" Padding="12,0">
+                        <Border Background="Transparent" Padding="10,0">
                             <ContentPresenter VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -216,6 +216,18 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- tab caption: only the selected tab shows its name, the rest are icon-only -->
+        <Style x:Key="TabLabel" TargetType="TextBlock">
+            <Setter Property="Margin" Value="7,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="ChipToggle" TargetType="ToggleButton">

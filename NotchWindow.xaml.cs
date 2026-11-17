@@ -17,7 +17,7 @@ namespace WindowsNotch;
 public partial class NotchWindow : Window
 {
     // ---- geometry ---------------------------------------------------------
-    private const double CollapsedW = 230, CollapsedWMedia = 300, CollapsedWTicker = 390;
+    private const double CollapsedW = 236, CollapsedWMedia = 304, CollapsedWTicker = 390, HudW = 330;
     private const double CollapsedH = 32, TickerH = 29;
     private const double PeekW = 420, PeekH = 66, PeekRadius = 28;
     private const double ExpandedW = 580, ExpandedH = 264, ExpandedHLyrics = 304, ExpandedRadius = 34;
@@ -34,6 +34,13 @@ public partial class NotchWindow : Window
     private readonly AppsService _apps = new();
     private readonly ShelfService _shelf = new();
     private IGestureEngine? _gestures;
+    private readonly VolumeWatcher _volume = new();
+    private readonly BrightnessWatcher _brightness = new();
+    private readonly NetworkWatcher _network = new();
+    private readonly NotificationWatcher _notifications = new();
+    private readonly DispatcherTimer _hudTimer = new();
+    private bool _hudShown, _eyesDancing;
+    private float _lastVolume = -1;
 
     // ---- state ------------------------------------------------------------
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMilliseconds(250) };
@@ -83,8 +90,9 @@ public partial class NotchWindow : Window
         InitializeComponent();
         _theme = new AccentTheme(Resources); // DynamicResource picks the live brushes up from here
 
-        foreach (var fx in new[] { NotchGlowFx, LiveGlowFx, HoldGlowFx, PeekGlowFx, ArtGlowFx, ProgGlowFx, DropGlowFx })
+        foreach (var fx in new[] { NotchGlowFx, LiveGlowFx, HoldGlowFx, PeekGlowFx, ArtGlowFx, ProgGlowFx, DropGlowFx, HudGlowFx, HudBarGlowFx, Eyes.Glow })
             _theme.RegisterGlow(fx);
+        _hudTimer.Tick += (_, _) => { _hudTimer.Stop(); HideHud(); };
 
         _kSung.Color = AccentTheme.Lighter(AccentTheme.Default, 0.35);
         _karaoke = new LinearGradientBrush(new GradientStopCollection
@@ -164,6 +172,8 @@ public partial class NotchWindow : Window
 
         if (App.SnapshotDir != null) { _clock.Start(); await RunSnapshotsAsync(App.SnapshotDir); return; }
 
+        StartSystemSignals();
+
         // If we start while the PC is already locked, wait for the unlock event instead.
         if (_settings.GesturesEnabled && !Native.IsSessionLocked()) await StartGesturesAsync();
         UpdateGestureUi();
@@ -196,6 +206,18 @@ public partial class NotchWindow : Window
         try
         {
             await Task.Delay(1500); Save("1-collapsed");
+            Eyes.Express(EyeMood.Happy, 60000);
+            await Task.Delay(700); Save("1b-eyes-happy");
+            Eyes.Express(EyeMood.Neutral, 10);
+            ShowHud("", "Volume", 0.62, "62", 60000);
+            await Task.Delay(900); Save("1c-hud-volume");
+            ShowHud("", "Home Wi-Fi", null, "", 60000);
+            Eyes.Express(EyeMood.Happy, 60000);
+            await Task.Delay(900); Save("1d-hud-wifi");
+            HideHud(); Eyes.Express(EyeMood.Neutral, 10);
+            await Task.Delay(800);
+            ShowPeek("Ana", "WhatsApp  ·  See you at 7?", null, "", media: false, ms: 60000);
+            await Task.Delay(1200); Save("1e-notification");
             _theme.Set(Color.FromRgb(0xFF, 0x5E, 0x9A), 1);
             ShowPeek("Blinding Lights", "The Weeknd  ·  Spotify", null, "", media: true, ms: 60000);
             PeekEq.IsPlaying = true;
@@ -225,6 +247,153 @@ public partial class NotchWindow : Window
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _captions.Stop();
         _gestures?.Dispose();
+        _volume.Dispose();
+        _brightness.Dispose();
+        _notifications.Dispose();
+    }
+
+    // =======================================================================
+    //  System signals → eyes + HUD (volume, brightness, network, notifications)
+    // =======================================================================
+    private void StartSystemSignals()
+    {
+        try
+        {
+            _volume.Changed += OnVolume;
+            _volume.Start();
+        }
+        catch (Exception ex) { App.Log("volume: " + ex.Message); }
+        try
+        {
+            _brightness.Changed += b => Dispatcher.BeginInvoke(() => OnBrightness(b));
+            _brightness.Start();
+        }
+        catch (Exception ex) { App.Log("brightness: " + ex.Message); }
+        try
+        {
+            _network.Changed += (online, name, wifi) => Dispatcher.BeginInvoke(() => OnNetwork(online, name, wifi));
+            _network.Start();
+        }
+        catch (Exception ex) { App.Log("network: " + ex.Message); }
+        try
+        {
+            _notifications.Received += (app, title, body) => Dispatcher.BeginInvoke(() => OnNotification(app, title, body));
+            _notifications.Start();
+        }
+        catch (Exception ex) { App.Log("notifications: " + ex.Message); }
+    }
+
+    private void OnVolume(float level, bool muted)
+    {
+        var pct = (int)Math.Round(level * 100);
+        var glyph = muted || pct == 0 ? "" : pct < 34 ? "" : pct < 67 ? "" : "";
+        var dir = _lastVolume < 0 ? 0 : Math.Sign(level - _lastVolume);
+        _lastVolume = level;
+        ShowHud(glyph, muted ? "Muted" : "Volume", muted ? 0 : level, muted ? "" : pct.ToString());
+        if (muted) Eyes.Express(EyeMood.Sleepy, 1400);
+        else if (pct >= 100) { Eyes.Express(EyeMood.Surprised, 900); Eyes.Jump(1.2); }
+        else Eyes.Nod(-dir);
+    }
+
+    private void OnBrightness(int pct)
+    {
+        ShowHud(pct < 40 ? "" : "", "Brightness", pct / 100.0, pct.ToString());
+        if (pct <= 15) Eyes.Express(EyeMood.Sleepy, 1400);
+        else if (pct >= 95) Eyes.Express(EyeMood.Surprised, 900);
+        else Eyes.Blink();
+    }
+
+    private void OnNetwork(bool online, string name, bool wifi)
+    {
+        App.Log($"network: {(online ? "online" : "offline")} {name}");
+        if (online)
+        {
+            ShowHud(wifi ? "" : "", string.IsNullOrEmpty(name) ? (wifi ? "Wi-Fi" : "Ethernet") : name, null, "Connected", 2200);
+            Eyes.Express(EyeMood.Happy, 1800);
+            Eyes.Jump(1.1);
+        }
+        else
+        {
+            ShowHud("", "Offline", null, "No internet", 2200);
+            Eyes.Express(EyeMood.Sad, 2400);
+        }
+    }
+
+    private void OnNotification(string app, string title, string body)
+    {
+        if (Expanded || _countdown > 0) return;
+        Eyes.Jump();
+        Eyes.Express(EyeMood.Surprised, 700);
+        Eyes.Attend(4, 0, 700);
+        var head = string.IsNullOrWhiteSpace(title) ? app : title;
+        var sub = string.Join("  ·  ", new[] { app, body }.Where(s => !string.IsNullOrWhiteSpace(s) && s != head));
+        // let the eyes react first, then open the bubble
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(520) };
+        t.Tick += (_, _) => { t.Stop(); ShowPeek(head, sub, null, "", media: false, ms: 4800); };
+        t.Start();
+    }
+
+    /// <summary>Volume / brightness / network: icon + label on the left, bar + value on the right, eyes in the middle.</summary>
+    private void ShowHud(string glyph, string label, double? value, string valueText, int ms = 1600)
+    {
+        if (_mode != Mode.Collapsed) return;
+        HudIcon.Text = glyph;
+        HudLabel.Text = label;
+        HudValue.Text = valueText;
+        HudTrack.Visibility = value.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        if (value.HasValue)
+            Motion.To(HudFill, WidthProperty, Math.Clamp(value.Value, 0, 1) * HudTrack.Width, 220, Motion.Out);
+
+        if (!_hudShown)
+        {
+            _hudShown = true;
+            if (value.HasValue) HudFill.Width = Math.Clamp(value.Value, 0, 1) * HudTrack.Width;
+            Motion.Hide(MiniLeft, 120);
+            Motion.Hide(MiniRight, 120);
+            foreach (var el in new UIElement[] { HudLeft, HudRight })
+            {
+                el.Visibility = Visibility.Visible;
+                el.Opacity = 0;
+                Motion.Show(el, 260, 90, blur: 6);
+            }
+            Motion.Pop(HudIconScale, 0.4, 1, 520, 0.7);
+            _targetW = _targetH = -1;
+            Morph(HudW, CollapsedH + (Ticker.Visibility == Visibility.Visible ? TickerH : 0), CollapsedRadius, 440, 0.3);
+        }
+        else Motion.Pop(HudIconScale, 0.85, 1, 300, 0.5);
+
+        _hudTimer.Interval = TimeSpan.FromMilliseconds(ms);
+        _hudTimer.Stop();
+        _hudTimer.Start();
+    }
+
+    private void HideHud()
+    {
+        if (!_hudShown) return;
+        _hudShown = false;
+        Motion.Hide(HudLeft, 120);
+        Motion.Hide(HudRight, 120);
+        foreach (var el in new UIElement[] { MiniLeft, MiniRight })
+        {
+            el.Visibility = Visibility.Visible;
+            el.Opacity = 0;
+            Motion.Show(el, 260, 110, blur: 6);
+        }
+        _targetW = _targetH = -1;
+        ApplyCollapsed(animate: true);
+    }
+
+    /// <summary>Eyes glance at the mouse when it comes near the top of the screen.</summary>
+    private void TrackCursorWithEyes()
+    {
+        if (_mode != Mode.Collapsed || !Native.GetCursorPos(out var p)) return;
+        var src = PresentationSource.FromVisual(this);
+        if (src?.CompositionTarget == null) return;
+        var eyes = Eyes.PointToScreen(new Point(Eyes.ActualWidth / 2, Eyes.ActualHeight / 2));
+        var dx = p.X - eyes.X;
+        var dy = p.Y - eyes.Y;
+        if (Math.Abs(dx) > 700 || dy > 420 || (Math.Abs(dx) < 2 && Math.Abs(dy) < 2)) return;
+        Eyes.Attend(Math.Clamp(dx / 90, -4, 4), Math.Clamp(dy / 120, -1, 2), 600);
     }
 
     private void OnTick()
@@ -233,6 +402,7 @@ public partial class NotchWindow : Window
         UpdateClock();
         UpdateProgress();
         RefreshLiveLine();
+        TrackCursorWithEyes();
 
         if (_tick % 8 == 0)
         {
@@ -473,7 +643,11 @@ public partial class NotchWindow : Window
             Motion.To(LiveGlowHost, OpacityProperty, glow, 500);
         }
 
-        var w = showTicker ? CollapsedWTicker : MediaActive ? CollapsedWMedia : CollapsedW;
+        var playing = _media.Current?.IsPlaying == true;
+        if (playing != _eyesDancing) { _eyesDancing = playing; Eyes.SetDancing(playing); }
+
+        var w = _hudShown ? Math.Max(HudW, showTicker ? CollapsedWTicker : 0)
+              : showTicker ? CollapsedWTicker : MediaActive ? CollapsedWMedia : CollapsedW;
         var h = CollapsedH + (showTicker ? TickerH : 0);
         Morph(w, h, showTicker ? 22 : CollapsedRadius, animate ? 480 : 0, 0.3);
     }
@@ -519,6 +693,13 @@ public partial class NotchWindow : Window
         var (pct, charging, has) = PowerService.Battery();
         MiniBattery.Update(pct, charging, has);
         HeadBattery.Update(pct, charging, has);
+        // the face gets drowsy when the battery is nearly empty
+        Eyes.SetBaseMood(has && !charging && pct <= 15 ? EyeMood.Sleepy : EyeMood.Neutral);
+        if (has && _lastCharging.HasValue && _lastCharging != charging)
+        {
+            Eyes.Express(charging ? EyeMood.Love : EyeMood.Surprised, 1800);
+            Eyes.Jump(1.15);
+        }
         if (has && _lastCharging.HasValue && _lastCharging != charging)
             ShowPeek(charging ? "Charging" : "On battery", $"{pct}%  ·  {(charging ? "plugged in" : "unplugged")}", null,
                 charging ? "" : "", media: false, ms: 2600);
@@ -873,7 +1054,8 @@ public partial class NotchWindow : Window
         if (idx == 1) RefreshApps(forceStagger: true);
         if (idx == 0) UpdateMediaPanel(false);
         if (idx == 2) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Stagger(ShelfList));
-        MoveTabIndicator(animate: true);
+        // tab widths change (only the selected one shows its name) → move after layout
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => MoveTabIndicator(animate: true));
         if (Expanded) Morph(ExpandedW, ExpandedHeight, ExpandedRadius, 460, 0.25);
     }
 

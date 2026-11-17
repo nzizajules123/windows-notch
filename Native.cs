@@ -42,6 +42,9 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int val, int size);
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
+
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder sb, ref int size);

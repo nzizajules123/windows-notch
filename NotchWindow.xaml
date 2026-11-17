@@ -163,8 +163,33 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+                            <!-- the little face in the middle -->
+                            <ui:NotchEyes x:Name="Eyes" Grid.Column="1" Margin="10,0" VerticalAlignment="Center"/>
+
+                            <!-- HUD: volume / brightness / network (replaces the side content for a moment) -->
+                            <StackPanel x:Name="HudLeft" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                                <Border x:Name="HudIconBox" Width="20" Height="20" CornerRadius="7" Background="{DynamicResource AccentGradient}" RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform><ScaleTransform x:Name="HudIconScale"/></Border.RenderTransform>
+                                    <Border.Effect><DropShadowEffect x:Name="HudGlowFx" BlurRadius="12" ShadowDepth="0" Opacity="0.7"/></Border.Effect>
+                                    <TextBlock x:Name="HudIcon" Style="{StaticResource Glyph}" FontSize="11" Foreground="#E6000000"/>
+                                </Border>
+                                <TextBlock x:Name="HudLabel" FontSize="12" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" MaxWidth="108"/>
+                            </StackPanel>
+                            <StackPanel x:Name="HudRight" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed">
+                                <Border x:Name="HudTrack" Width="58" Height="5" CornerRadius="2.5" Background="#26FFFFFF" VerticalAlignment="Center">
+                                    <Border x:Name="HudFill" HorizontalAlignment="Left" Width="0" CornerRadius="2.5" Background="{DynamicResource AccentGradientH}">
+                                        <Border.Effect><DropShadowEffect x:Name="HudBarGlowFx" BlurRadius="8" ShadowDepth="0" Opacity="0.9"/></Border.Effect>
+                                    </Border>
+                                </Border>
+                                <TextBlock x:Name="HudValue" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource FgDim}" Margin="7,0,0,0"
+                                           MinWidth="22" TextAlignment="Right" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="MiniLeft" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Border x:Name="MiniThumb" Width="20" Height="20" CornerRadius="6" Margin="0,0,8,0" Visibility="Collapsed"
                                         Background="{StaticResource GlassFill}" RenderTransformOrigin="0.5,0.5">
                                     <Border.RenderTransform><ScaleTransform x:Name="MiniThumbScale"/></Border.RenderTransform>
@@ -174,7 +199,7 @@
                                 </Border>
                                 <TextBlock x:Name="MiniTime" Text="12:00" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel x:Name="MiniRight" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                 <Grid x:Name="MiniCamDot" Width="8" Height="8" Margin="0,0,9,0" VerticalAlignment="Center" Visibility="Collapsed"
                                       ToolTip="Gesture camera is watching">
                                     <Ellipse Fill="{StaticResource GradCamera}">
@@ -243,17 +268,17 @@
                                     </Border>
                                 </Canvas>
                                 <StackPanel x:Name="TabStrip" Orientation="Horizontal">
-                                    <RadioButton x:Name="TabMedia" Style="{StaticResource TabButton}" GroupName="tabs" Tag="0" IsChecked="True" Checked="Tab_Checked">
-                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="12" Margin="0,0,7,0"/><TextBlock Text="Media"/></StackPanel>
+                                    <RadioButton x:Name="TabMedia" Style="{StaticResource TabButton}" GroupName="tabs" Tag="0" IsChecked="True" Checked="Tab_Checked" ToolTip="Media">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Media"/></StackPanel>
                                     </RadioButton>
-                                    <RadioButton x:Name="TabApps" Style="{StaticResource TabButton}" GroupName="tabs" Tag="1" Checked="Tab_Checked">
-                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE71D;" FontSize="12" Margin="0,0,7,0"/><TextBlock Text="Apps"/></StackPanel>
+                                    <RadioButton x:Name="TabApps" Style="{StaticResource TabButton}" GroupName="tabs" Tag="1" Checked="Tab_Checked" ToolTip="Apps">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE71D;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Apps"/></StackPanel>
                                     </RadioButton>
-                                    <RadioButton x:Name="TabShelf" Style="{StaticResource TabButton}" GroupName="tabs" Tag="2" Checked="Tab_Checked">
-                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE8B7;" FontSize="12" Margin="0,0,7,0"/><TextBlock Text="Shelf"/></StackPanel>
+                                    <RadioButton x:Name="TabShelf" Style="{StaticResource TabButton}" GroupName="tabs" Tag="2" Checked="Tab_Checked" ToolTip="Shelf">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE8B7;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Shelf"/></StackPanel>
                                     </RadioButton>
-                                    <RadioButton x:Name="TabPower" Style="{StaticResource TabButton}" GroupName="tabs" Tag="3" Checked="Tab_Checked">
-                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE7E8;" FontSize="12" Margin="0,0,7,0"/><TextBlock Text="Control"/></StackPanel>
+                                    <RadioButton x:Name="TabPower" Style="{StaticResource TabButton}" GroupName="tabs" Tag="3" Checked="Tab_Checked" ToolTip="Control">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE7E8;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Control"/></StackPanel>
                                     </RadioButton>
                                 </StackPanel>
                             </Grid>

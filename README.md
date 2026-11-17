@@ -7,10 +7,23 @@ that expands on hover into a control center.
 
 | State | Shows |
 |---|---|
-| **Idle (collapsed)** | Time · battery % (green bolt when charging) · green dot when the gesture camera is watching |
-| **Media playing (collapsed)** | Artwork thumbnail · time · animated equalizer bars tinted with the artwork colour · battery |
+| **Idle (collapsed)** | Time · **living eyes** in the middle · battery (colour by level, green shimmer + bolt when charging) · green dot when the gesture camera is watching |
+| **Media playing (collapsed)** | Artwork thumbnail · time · eyes bobbing to the music · animated equalizer bars tinted with the artwork colour · battery |
+| **Volume / brightness** | The pill widens: icon + label, eyes in the middle, a glowing level bar + value |
+| **Internet** | Wi-Fi / Ethernet name with happy eyes when connected; sad eyes and "No internet" when it drops |
+| **Notification** | The eyes jump in surprise, then the pill opens with the app, title and message |
 | **Lyrics / captions on** | A live line under the pill with the current lyric or caption |
-| **Hover** | Expands after a short hover; closes **3 s** after the mouse leaves |
+| **Hover** | Expands after a short hover (the eyes hide); closes **3 s** after the mouse leaves |
+
+### The eyes
+
+The eyes blink, glance around, follow your mouse when it comes near the top of the screen, and pull faces:
+happy `^ ^` (connected, max volume), surprised (notification, unplugged), hearts (charger plugged in),
+sleepy (muted, very dim screen, battery ≤ 15 %) and sad (internet lost). They take on the artwork colour's glow.
+
+| Idle | Happy | Volume | Wi-Fi | Notification |
+|---|---|---|---|---|
+| ![](docs/screenshots/1-collapsed.png) | ![](docs/screenshots/1b-eyes-happy.png) | ![](docs/screenshots/1c-hud-volume.png) | ![](docs/screenshots/1d-hud-wifi.png) | ![](docs/screenshots/1e-notification.png) |
 
 Expanded tabs:
 
