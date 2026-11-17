@@ -157,7 +157,11 @@ public partial class NotchWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
         PositionWindow();
-        if (App.SnapshotDir == null) SetBlur(true);
+        if (App.SnapshotDir == null)
+        {
+            try { _backing = new BlurBacking(); } catch (Exception ex) { App.Log("blur backing: " + ex.Message); }
+            SetBlur(true);
+        }
         SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
     }
@@ -291,6 +295,7 @@ public partial class NotchWindow : Window
         _notifications.Dispose();
         _devices.Dispose();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _backing?.Dispose();
     }
 
     // =======================================================================
@@ -615,6 +620,7 @@ public partial class NotchWindow : Window
         if (_tick % 8 == 0)
         {
             Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            VerifyRegion();
             if (Expanded && TabApps.IsChecked == true) RefreshApps();
         }
         if (_tick % 4 == 0) UpdateFullscreenFade();
@@ -701,12 +707,17 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Frosted backdrop: acrylic blur clipped to the island's outline
     // =======================================================================
+    private bool _wantBlur;
+    private BlurBacking? _backing;
+
+    /// <summary>The frosted blur lives in a separate window under the island (see <see cref="BlurBacking"/>).</summary>
     private void SetBlur(bool on)
     {
-        if (_hwnd == IntPtr.Zero || on == _blurOn) return;
+        _wantBlur = on;
         _blurOn = on;
-        try { Backdrop.SetBlur(_hwnd, on, 0x12000000); } catch (Exception ex) { App.Log("blur: " + ex.Message); }
-        UpdateRegion();
+        if (_backing == null) return;
+        if (on) UpdateRegion();
+        else _backing.Hide();
     }
 
     private void UpdateRegion()
@@ -717,9 +728,20 @@ public partial class NotchWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this);
         var p = Notch.TranslatePoint(new Point(0, 0), Root);
         var r = Math.Min(NotchRadius, Math.Min(w, h) / 2);
-        Backdrop.SetShape(_hwnd, p.X * dpi.DpiScaleX, p.Y * dpi.DpiScaleY, w * dpi.DpiScaleX, h * dpi.DpiScaleY,
-            r * dpi.DpiScaleX, 12 * dpi.DpiScaleX);
+        double sx = dpi.DpiScaleX, sy = dpi.DpiScaleY;
+        try
+        {
+            // clip the main window to the island too (hit-testing + no stray shadow under the glass)
+            Backdrop.SetShape(_hwnd, p.X * sx, p.Y * sy, w * sx, h * sy, r * sx, 12 * sx);
+            if (_wantBlur && _backing != null && Native.GetWindowRect(_hwnd, out var win))
+                _backing.Place(_hwnd, win.Left + (int)Math.Round(p.X * sx), win.Top + (int)Math.Round(p.Y * sy),
+                    (int)Math.Round(w * sx), (int)Math.Round(h * sy), r * sx, (int)Math.Round(12 * sx));
+        }
+        catch (Exception ex) { App.Log("region: " + ex.Message); }
     }
+
+    /// <summary>Keeps the blur window glued under the notch (z-order can be shuffled by other topmost windows).</summary>
+    private void VerifyRegion() { if (_wantBlur) UpdateRegion(); }
 
     private void SetGlass(Mode mode) => Motion.Color(_glass, SolidColorBrush.ColorProperty,
         mode switch { Mode.Expanded => GlassOpen, Mode.Peek => GlassPeek, _ => GlassCollapsed }, 380);
