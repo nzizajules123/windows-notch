@@ -262,8 +262,8 @@ public sealed class NotificationWatcher : IDisposable
     private DateTime _lastFire = DateTime.MinValue;
     private string _lastText = "";
 
-    /// <summary>(app, title, body).</summary>
-    public event Action<string, string, string>? Received;
+    /// <summary>The toast that just appeared (text + its inline reply box, if any).</summary>
+    public event Action<ToastInfo>? Received;
 
     public NotificationWatcher() => _proc = OnEvent;
 
@@ -301,16 +301,24 @@ public sealed class NotificationWatcher : IDisposable
         var all = root.FindAll(TreeScope.Descendants, Condition.TrueCondition);
         string? header = null;
         var texts = new List<string>();
+        AutomationElement? replyBox = null, sendButton = null;
         foreach (AutomationElement e in all)
         {
             string name;
-            try { name = e.Current.Name ?? ""; } catch { continue; }
+            ControlType ct0;
+            try { name = e.Current.Name ?? ""; ct0 = e.Current.ControlType; } catch { continue; }
+            if (ct0 == ControlType.Edit && replyBox == null) replyBox = e;
+            if (ct0 == ControlType.Button && sendButton == null)
+            {
+                var bn = name.ToLowerInvariant();
+                if (bn.Contains("send") || bn.Contains("reply") || bn.Contains("envoyer") || bn.Contains("enviar") || bn.Contains("senden")) sendButton = e;
+            }
             if (string.IsNullOrWhiteSpace(name)) continue;
-            var ct = e.Current.ControlType;
+            var ct = ct0;
             if (header == null && (ct == ControlType.ListItem || ct == ControlType.Window || ct == ControlType.Group) &&
                 (name.Contains("notification", StringComparison.OrdinalIgnoreCase) || name.Contains(',')))
                 header = name;
-            if (ct == ControlType.Text && name.Length > 0 && texts.Count < 4 && !texts.Contains(name)) texts.Add(name);
+            if (ct == ControlType.Text && name.Length > 0 && texts.Count < 8 && !texts.Contains(name)) texts.Add(name);
         }
         if (header == null && texts.Count == 0) return;
         if (header == null && !windowTitle.Contains("notification", StringComparison.OrdinalIgnoreCase)) return;
@@ -334,13 +342,20 @@ public sealed class NotificationWatcher : IDisposable
             }
         }
         if (title.Length == 0 && body.Length == 0) return;
+        // Notification Center / the calendar flyout itself (date header) is not a notification
+        if (app.Equals("Notifications", StringComparison.OrdinalIgnoreCase) || windowTitle.Contains("Notification Center", StringComparison.OrdinalIgnoreCase)
+            || System.Text.RegularExpressions.Regex.IsMatch(title.Replace("‎", ""), @"^\d{1,2}:\d{2}(:\d{2})?$")) return;
 
         var key = app + title + body;
         if (key == _lastText && DateTime.Now - _lastFire < TimeSpan.FromSeconds(4)) return;
         _lastText = key;
         _lastFire = DateTime.Now;
-        App.Log($"notification: [{app}] {title} — {body}");
-        Received?.Invoke(app, title, body);
+        App.Log($"notification: [{app}] {title} — {body}{(replyBox != null ? "  (has reply box)" : "")}");
+        Received?.Invoke(new ToastInfo
+        {
+            App = app, Title = title, Body = body, Texts = texts.Concat(header != null ? new[] { header } : Array.Empty<string>()).ToList(),
+            ReplyBox = replyBox, SendButton = sendButton,
+        });
     }
 
     public void Dispose()

@@ -99,6 +99,59 @@
         </Style>
 
         <!-- ============ glass tile: lifts on hover, squishes on press ============ -->
+        <!-- full-width list row (chats, search suggestions): glass, soft highlight, tiny press -->
+        <Style x:Key="RowButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="root" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform>
+                            <Border Background="#0FFFFFFF" BorderBrush="#14FFFFFF" BorderThickness="1" CornerRadius="13"/>
+                            <Border x:Name="hl" CornerRadius="13" Background="#14FFFFFF" Opacity="0"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions><BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/>
+                                </Storyboard></BeginStoryboard></Trigger.EnterActions>
+                                <Trigger.ExitActions><BeginStoryboard><Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/>
+                                </Storyboard></BeginStoryboard></Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="root" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.985" ScaleY="0.985"/></Setter.Value></Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ChipButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="10" Background="#26FFFFFF" Padding="9,3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#40FFFFFF"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Background" Value="#1AFFFFFF"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="TileButton" TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource Fg}"/>
             <Setter Property="Background" Value="{StaticResource GlassFill}"/>

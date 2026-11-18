@@ -15,6 +15,18 @@ that expands on hover into a control center.
 | **Lyrics / captions on** | A live line under the pill with the current lyric or caption |
 | **Hover** | Expands after a short hover (the eyes hide); closes **3 s** after the mouse leaves |
 
+### Chats and music search
+
+- **Chats tab**: WhatsApp, Instagram, Telegram, Messenger… messages that arrive as notifications are collected per
+  conversation. Hover a message pop-up to open it straight in the reply view. **Reply** types into the notification's
+  own reply box, so it's sent by the app itself. If that notification is gone, the notch looks for it in Notification
+  Center; otherwise it copies your reply and opens the app so you only paste it. (Only messages that arrive while the
+  notch is running are shown; it can't read your chat history.)
+- **Search tab**: type a song or artist and YouTube's suggestions appear as you type. Click one to open it on YouTube, or
+  **YT Music** to open it on YouTube Music. Enter opens YouTube; Shift+Enter opens YouTube Music.
+- **Android**: same Chats view with **reply sent through WhatsApp / Instagram's own reply action**, plus a Search view
+  where **Play** starts the top result in YouTube Music (or opens YouTube if it isn't installed).
+
 ### The eyes
 
 Little 3D eyes: shaded eyeballs, a coloured iris (it takes the artwork colour) that slides and foreshortens as they look

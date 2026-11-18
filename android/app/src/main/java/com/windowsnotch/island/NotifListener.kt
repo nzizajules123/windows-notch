@@ -14,6 +14,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -163,6 +164,50 @@ class NotifListener : NotificationListenerService() {
         val pm = packageManager
         val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
         val icon = runCatching { pm.getApplicationIcon(sbn.packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
-        main.post { Island.post(IslandEvent.Notification(app, title, text.replace('\n', ' '), icon)) }
+
+        // chats: WhatsApp, Instagram, Telegram, Messenger, Signal, SMS… anything with an inline "Reply" action
+        val replyAction = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
+        val isChat = sbn.packageName in MESSENGERS || n.category == Notification.CATEGORY_MESSAGE || replyAction != null
+        val avatar = runCatching { n.getLargeIcon()?.loadDrawable(this)?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
+        val style = if (isChat) runCatching { NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(n) }.getOrNull() else null
+
+        main.post {
+            val chat = if (isChat) upsertChat(sbn.packageName, app, title, text, style, replyAction, icon, avatar) else null
+            Island.post(IslandEvent.Notification(chat?.app ?: app, chat?.title ?: title, text.replace('\n', ' '), icon, chat))
+        }
+    }
+
+    private fun upsertChat(
+        pkg: String, app: String, title: String, text: String, style: NotificationCompat.MessagingStyle?,
+        reply: Notification.Action?, icon: androidx.compose.ui.graphics.ImageBitmap?, avatar: androidx.compose.ui.graphics.ImageBitmap?,
+    ): ChatThread {
+        val name = (style?.conversationTitle?.toString() ?: title).ifBlank { app }
+            .replace(Regex("""\s*\(\d+ (messages|new messages)\)$"""), "")
+        val key = "$pkg|$name"
+        val t = Island.chats.firstOrNull { it.key == key } ?: ChatThread(key, app, pkg, name).also { Island.chats.add(0, it) }
+        if (Island.chats.indexOf(t) > 0) { Island.chats.remove(t); Island.chats.add(0, t) }
+        t.icon = icon
+        if (avatar != null) t.avatar = avatar
+        if (reply != null) t.reply = reply
+        val incoming = style?.messages?.takeLast(8)?.map {
+            ChatMsg(it.person?.name?.toString() ?: name, it.text?.toString().orEmpty(), it.timestamp, false)
+        }?.filter { it.text.isNotBlank() } ?: listOf(ChatMsg(name, text, System.currentTimeMillis(), false))
+        var added = 0
+        for (m in incoming) {
+            if (t.messages.none { !it.mine && it.text == m.text && kotlin.math.abs(it.time - m.time) < 120_000 }) { t.messages.add(m); added++ }
+        }
+        while (t.messages.size > 40) t.messages.removeAt(0)
+        t.unread += added
+        t.updated = System.currentTimeMillis()
+        while (Island.chats.size > 25) Island.chats.removeAt(Island.chats.lastIndex)
+        return t
+    }
+
+    companion object {
+        private val MESSENGERS = setOf(
+            "com.whatsapp", "com.whatsapp.w4b", "com.instagram.android", "com.instagram.barcelona",
+            "org.telegram.messenger", "com.facebook.orca", "org.thoughtcrime.securesms", "com.google.android.apps.messaging",
+            "com.snapchat.android", "com.discord",
+        )
     }
 }

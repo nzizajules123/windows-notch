@@ -20,7 +20,7 @@ public partial class NotchWindow : Window
     private const double CollapsedW = 236, CollapsedWMedia = 304, CollapsedWTicker = 390, HudW = 330;
     private const double CollapsedH = 32, TickerH = 29;
     private const double PeekW = 420, PeekH = 66, PeekRadius = 28;
-    private const double ExpandedW = 580, ExpandedH = 264, ExpandedHLyrics = 304, ExpandedRadius = 34;
+    private const double ExpandedW = 580, ExpandedH = 264, ExpandedHLyrics = 304, ExpandedHChat = 330, ExpandedRadius = 34;
     private const double CollapsedRadius = 16;
 
     private enum Mode { Collapsed, Peek, Expanded }
@@ -40,6 +40,13 @@ public partial class NotchWindow : Window
     private readonly NotificationWatcher _notifications = new();
     private readonly DispatcherTimer _hudTimer = new();
     private bool _hudShown, _eyesDancing, _blurOn;
+    // chats + music search
+    private readonly ChatService _chats = new();
+    private ChatThread? _openThread, _pendingChat;
+    private readonly System.Collections.ObjectModel.ObservableCollection<string> _suggestions = new();
+    private readonly DispatcherTimer _suggestTimer = new() { Interval = TimeSpan.FromMilliseconds(220) };
+    private static readonly System.Net.Http.HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private bool _typing;
     private readonly DeviceWatcher _devices = new();
     private UIElement? _card;                                  // view shown in Peek mode (peek / charge / device)
     // the island's tint over the acrylic blur: solid while collapsed, frosted when open
@@ -125,7 +132,16 @@ public partial class NotchWindow : Window
         UpdateShelfState();
 
         _collapseTimer.Interval = TimeSpan.FromSeconds(_settings.CollapseDelaySec);
-        _collapseTimer.Tick += (_, _) => { _collapseTimer.Stop(); if (!Notch.IsMouseOver) Collapse(); };
+        _collapseTimer.Tick += (_, _) =>
+        {
+            _collapseTimer.Stop();
+            if (_typing) return;               // stay open while you're typing a reply / search
+            if (!Notch.IsMouseOver) Collapse();
+        };
+        ChatsList.ItemsSource = _chats.Threads;
+        SuggestionList.ItemsSource = _suggestions;
+        _suggestTimer.Tick += async (_, _) => { _suggestTimer.Stop(); await LoadSuggestionsAsync(SearchBox.Text); };
+        Deactivated += (_, _) => { StopTyping(); if (Expanded && !Notch.IsMouseOver) RestartCollapseTimer(); };
         _hoverIntent.Tick += (_, _) =>
         {
             _hoverIntent.Stop();
@@ -415,6 +431,20 @@ public partial class NotchWindow : Window
                 tab.IsChecked = true;
                 await Task.Delay(1300); Save(name);
             }
+            // chats + music search
+            _chats.Add("Instagram", new ToastInfo { Title = "travel.with.mia", Body = "sent you a reel 🎬" }, null);
+            _chats.Add("WhatsApp", new ToastInfo { Title = "Ana", Body = "Hey, are you coming tonight?" }, null);
+            _chats.Add("WhatsApp", new ToastInfo { Title = "Ana", Body = "We're at the usual place 🍕" }, null);
+            UpdateChatsState();
+            TabChats.IsChecked = true;
+            await Task.Delay(1100); Save("10-chats");
+            OpenThread(_chats.Threads[0]);
+            _chats.Threads[0].Messages.Add(new ChatMessage { From = "You", Text = "On my way! 10 min 🚀", Mine = true });
+            await Task.Delay(900); Save("11-chat-reply");
+            TabSearch.IsChecked = true;
+            SearchBox.Text = "indila";
+            await LoadSuggestionsAsync("indila");
+            await Task.Delay(900); Save("12-search");
             StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", () => { });
             await Task.Delay(1600); Save("7-countdown");
             CancelCountdown();
@@ -466,7 +496,7 @@ public partial class NotchWindow : Window
         catch (Exception ex) { App.Log("network: " + ex.Message); }
         try
         {
-            _notifications.Received += (app, title, body) => Dispatcher.BeginInvoke(() => OnNotification(app, title, body));
+            _notifications.Received += t => Dispatcher.BeginInvoke(() => OnToast(t));
             _notifications.Start();
         }
         catch (Exception ex) { App.Log("notifications: " + ex.Message); }
@@ -521,7 +551,21 @@ public partial class NotchWindow : Window
         }
     }
 
-    private void OnNotification(string app, string title, string body)
+    /// <summary>A Windows toast arrived: chat messages go to the Chats tab (ready to reply), everything pops up.</summary>
+    private void OnToast(ToastInfo t)
+    {
+        var messenger = ChatService.MessengerOf(t);
+        if (messenger != null)
+        {
+            var thread = _chats.Add(messenger, t, AppIconFor(t.App) ?? AppIconFor(messenger));
+            _pendingChat = thread;
+            UpdateChatsState();
+            if (Expanded && _tabIndex == 4 && _openThread == thread) ScrollChatToEnd();
+        }
+        OnNotification(messenger ?? t.App, t.Title, t.Body, isChat: messenger != null);
+    }
+
+    private void OnNotification(string app, string title, string body, bool isChat = false)
     {
         if (Expanded || _countdown > 0) return;
         Eyes.Jump();
@@ -530,11 +574,187 @@ public partial class NotchWindow : Window
         var head = string.IsNullOrWhiteSpace(title) ? app : title;
         var sub = string.IsNullOrWhiteSpace(body) || body == head ? "" : body;
         var icon = AppIconFor(app);
-        var appLine = string.IsNullOrWhiteSpace(app) ? "Notification  ·  now" : $"{app}  ·  now";
+        var appLine = string.IsNullOrWhiteSpace(app) ? "Notification  ·  now" : $"{app}  ·  now{(isChat ? "  ·  hover to reply" : "")}";
         // let the eyes react first, then open the bubble
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(520) };
         t.Tick += (_, _) => { t.Stop(); ShowPeek(head, sub, icon, "\uEA8F", media: false, ms: 5200, app: appLine); };
         t.Start();
+    }
+
+    // =======================================================================
+    //  Chats: WhatsApp / Instagram … conversations from notifications, with reply
+    // =======================================================================
+    private void UpdateChatsState()
+    {
+        var any = _chats.Threads.Count > 0;
+        ChatsEmpty.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
+        ChatsListHost.Visibility = any && _openThread == null ? Visibility.Visible : Visibility.Collapsed;
+        ChatView.Visibility = _openThread != null ? Visibility.Visible : Visibility.Collapsed;
+        ChatsBadge.Visibility = _chats.Threads.Any(t => t.Unread > 0) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OpenThread(ChatThread t)
+    {
+        _openThread = t;
+        ChatTitle.Text = t.Title;
+        ChatApp.Text = t.App;
+        ChatMessages.ItemsSource = t.Messages;
+        t.Unread = 0;
+        ReplyStatus.Visibility = Visibility.Collapsed;
+        UpdateChatsState();
+        ChatView.Opacity = 0;
+        Motion.Show(ChatView, 240, 0, blur: 6, fromY: 8);
+        ScrollChatToEnd();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => StartTyping(ReplyBox));
+    }
+
+    private void ScrollChatToEnd() => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ChatScroll.ScrollToEnd());
+
+    private void ChatRow_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ChatThread t) OpenThread(t);
+    }
+
+    private void ChatBack_Click(object sender, RoutedEventArgs e)
+    {
+        _openThread = null;
+        UpdateChatsState();
+        Stagger(ChatsList);
+    }
+
+    private void ReplyBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        ReplyHint.Visibility = ReplyBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    private async void ReplyBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { e.Handled = true; await SendReplyAsync(); }
+        else if (e.Key == Key.Escape) { e.Handled = true; StopTyping(); }
+    }
+
+    private async void ReplySend_Click(object sender, RoutedEventArgs e) => await SendReplyAsync();
+
+    private async Task SendReplyAsync()
+    {
+        var t = _openThread;
+        var text = ReplyBox.Text.Trim();
+        if (t == null || text.Length == 0) return;
+        ReplyBox.IsEnabled = false;
+        ReplySend.IsEnabled = false;
+        ReplyStatus.Text = "Sending…";
+        ReplyStatus.Visibility = Visibility.Visible;
+        var r = await _chats.ReplyAsync(t, text);
+        ReplyBox.Text = "";
+        ReplyBox.IsEnabled = true;
+        ReplySend.IsEnabled = true;
+        ReplyStatus.Text = r switch
+        {
+            ReplyResult.SentInline or ReplyResult.SentFromCenter => $"✓  Sent to {t.Title}",
+            ReplyResult.CopiedAndOpened => $"Copied — {t.App} is opening: press Ctrl+V, then Enter",
+            _ => "Couldn't send this one",
+        };
+        if (r is ReplyResult.SentInline or ReplyResult.SentFromCenter) { Eyes.Express(EyeMood.Happy, 1200); }
+        Motion.SlideIn(ReplyStatus, 6, 260);
+        ScrollChatToEnd();
+        UpdateChatsState();
+    }
+
+    // ---- typing: the notch normally never takes focus; while a text box is used it may
+    private void TypingBox_MouseDown(object sender, MouseButtonEventArgs e) => StartTyping((TextBox)sender);
+
+    private void TypingBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (e.NewFocus is TextBox) return;
+        StopTyping();
+        if (Expanded && !Notch.IsMouseOver) RestartCollapseTimer();
+    }
+
+    private void StartTyping(TextBox box)
+    {
+        if (!Expanded) return;
+        if (App.SnapshotDir != null) { box.Focus(); return; }
+        if (!_typing)
+        {
+            _typing = true;
+            var ex = Native.GetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE).ToInt64();
+            Native.SetWindowLongPtr(_hwnd, Native.GWL_EXSTYLE, new IntPtr(ex & ~Native.WS_EX_NOACTIVATE));
+            Activate();
+            Native.SetForegroundWindow(_hwnd);
+        }
+        box.Focus();
+        Keyboard.Focus(box);
+        box.CaretIndex = box.Text.Length;
+    }
+
+    private void StopTyping()
+    {
+        if (!_typing) return;
+        _typing = false;
+        Keyboard.ClearFocus();
+        Native.AddExStyle(_hwnd, Native.WS_EX_NOACTIVATE);
+    }
+
+    // =======================================================================
+    //  Music search: YouTube suggestions as you type, open on YouTube / YouTube Music
+    // =======================================================================
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SearchHint.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _suggestTimer.Stop();
+        if (SearchBox.Text.Trim().Length == 0) { _suggestions.Clear(); SearchEmpty.Visibility = Visibility.Visible; return; }
+        _suggestTimer.Start();
+    }
+
+    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && SearchBox.Text.Trim().Length > 0) { e.Handled = true; OpenYouTube(SearchBox.Text.Trim(), music: Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)); }
+        else if (e.Key == Key.Escape) { e.Handled = true; StopTyping(); }
+    }
+
+    private async Task LoadSuggestionsAsync(string query)
+    {
+        query = query.Trim();
+        if (query.Length == 0) return;
+        try
+        {
+            // YouTube's own search-box suggestions
+            var json = await Http.GetStringAsync("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=en&q=" + Uri.EscapeDataString(query));
+            if (SearchBox.Text.Trim() != query) return;   // user kept typing
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var list = doc.RootElement[1].EnumerateArray().Select(x => x.GetString() ?? "").Where(s => s.Length > 0).Take(6).ToList();
+            _suggestions.Clear();
+            _suggestions.Add(query);
+            foreach (var s in list) if (!string.Equals(s, query, StringComparison.OrdinalIgnoreCase)) _suggestions.Add(s);
+            SearchEmpty.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            App.Log("suggest: " + ex.Message);
+            _suggestions.Clear();
+            _suggestions.Add(query);
+            SearchEmpty.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void Suggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is string q) OpenYouTube(q, music: false);
+    }
+
+    private void SuggestionMusic_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is string q) OpenYouTube(q, music: true);
+    }
+
+    private void OpenYouTube(string query, bool music)
+    {
+        var url = music
+            ? "https://music.youtube.com/search?q=" + Uri.EscapeDataString(query)
+            : "https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(query);
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { App.Log("open youtube: " + ex.Message); }
+        StopTyping();
+        Eyes.Express(EyeMood.Happy, 1200);
+        Collapse();
     }
 
     /// <summary>Finds the icon of the app that sent a notification (by matching a running process).</summary>
@@ -927,6 +1147,12 @@ public partial class NotchWindow : Window
         Morph(ExpandedW, ExpandedHeight, ExpandedRadius, 560, 0.32);
         Motion.Hide(CollapsedView, 110);
         if (wasPeek && _card != null) { Motion.Hide(_card, 110); _card = null; }
+        // hovering a message pop-up opens straight into that conversation, ready to reply
+        if (wasPeek && _pendingChat is { } chat)
+        {
+            _pendingChat = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { TabChats.IsChecked = true; OpenThread(chat); });
+        }
         ExpandedView.Opacity = 0;
         Motion.Show(ExpandedView, 320, 150, blur: 14, fromY: -12);
 
@@ -949,6 +1175,7 @@ public partial class NotchWindow : Window
     {
         if (!Expanded || _countdown > 0 || _draggingOut) return;
         _mode = Mode.Collapsed;
+        StopTyping();
         SetGlass(Mode.Collapsed);
         Motion.Hide(ExpandedView, 130, blur: 12);
         Motion.To(Ambient, OpacityProperty, 0, 220, done: () => { if (!Expanded) SetAmbientDrift(false); });
@@ -1019,6 +1246,7 @@ public partial class NotchWindow : Window
     {
         if (_mode != Mode.Peek) return;
         _mode = Mode.Collapsed;
+        _pendingChat = null;
         SetGlass(Mode.Collapsed);
         if (_card != null) Motion.Hide(_card, 130, blur: 10);
         _card = null;
@@ -1032,8 +1260,9 @@ public partial class NotchWindow : Window
     }
 
     /// <summary>The media tab grows taller when the lyrics stage is showing.</summary>
-    private double ExpandedHeight => _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null
-        ? ExpandedHLyrics : ExpandedH;
+    private double ExpandedHeight =>
+        _tabIndex is 4 or 5 ? ExpandedHChat
+        : _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null ? ExpandedHLyrics : ExpandedH;
 
     private void ApplyCollapsed(bool animate)
     {
@@ -1453,8 +1682,8 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Tabs: sliding glass indicator + directional panel transitions
     // =======================================================================
-    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel };
-    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower };
+    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel, ChatsPanel, SearchPanel };
+    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower, TabChats, TabSearch };
 
     private void Tab_Checked(object sender, RoutedEventArgs e)
     {
@@ -1475,6 +1704,8 @@ public partial class NotchWindow : Window
         Motion.To(t, TranslateTransform.XProperty, 0, 460, Motion.Spring(0.35));
 
         if (idx == 1) RefreshApps(forceStagger: true);
+        if (idx == 4) UpdateChatsState();
+        if (idx == 5) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => StartTyping(SearchBox));
         if (idx == 0) UpdateMediaPanel(false);
         if (idx == 2) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Stagger(ShelfList));
         // tab widths change (only the selected one shows its name) → move after layout

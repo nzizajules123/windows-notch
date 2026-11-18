@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
@@ -33,8 +34,22 @@ data class MediaInfo(
     }
 }
 
+class ChatMsg(val from: String, val text: String, val time: Long, val mine: Boolean)
+
+/** One WhatsApp / Instagram / … conversation, built from its notifications. */
+class ChatThread(val key: String, val app: String, val pkg: String, val title: String) {
+    val messages = mutableStateListOf<ChatMsg>()
+    var icon by mutableStateOf<ImageBitmap?>(null)
+    var avatar by mutableStateOf<ImageBitmap?>(null)
+    var unread by mutableIntStateOf(0)
+    var updated by mutableLongStateOf(System.currentTimeMillis())
+    /** The notification's own "Reply" action (RemoteInput) — how replies are sent. */
+    @Volatile var reply: android.app.Notification.Action? = null
+    val canReply get() = reply != null
+}
+
 sealed interface IslandEvent {
-    data class Notification(val app: String, val title: String, val text: String, val icon: ImageBitmap?) : IslandEvent
+    data class Notification(val app: String, val title: String, val text: String, val icon: ImageBitmap?, val chat: ChatThread? = null) : IslandEvent
     data class Charge(val charging: Boolean, val percent: Int) : IslandEvent
     data class Volume(val level: Float, val muted: Boolean) : IslandEvent
 }
@@ -65,6 +80,13 @@ object Island {
     var lyricsEnabled by mutableStateOf(true)
 
     @Volatile var controller: MediaController? = null
+
+    /** Recent conversations, newest first. */
+    val chats = mutableStateListOf<ChatThread>()
+    /** Conversation to open in the island (set by tapping a message pop-up or a chat row). */
+    var openChat by mutableStateOf<ChatThread?>(null)
+    /** True while a text field in the island has focus → the overlay must accept the keyboard. */
+    var typing by mutableStateOf(false)
 
     fun post(e: IslandEvent) {
         event = e

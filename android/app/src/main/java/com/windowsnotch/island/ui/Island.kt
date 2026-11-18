@@ -36,7 +36,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -101,6 +103,7 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     var mode by remember { mutableStateOf(if (demo) Mode.Collapsed else Mode.Intro) }
     var peek by remember { mutableStateOf<IslandEvent?>(null) }
     var lastTouch by remember { mutableLongStateOf(0L) }
+    var tab by remember { mutableIntStateOf(0) }          // 0 media · 1 chats · 2 search
     val media = Island.media
     val playing = media?.playing == true
     val accent = media?.accent ?: Green
@@ -113,7 +116,12 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
         Mode.Intro -> Triple(pillH, pillH, pillH / 2)
         Mode.Collapsed -> if (volume != null) Triple(minOf(sw - 24f, 300f), pillH, pillH / 2) else Triple(camGap + 2 * slot, pillH, pillH / 2)
         Mode.Peek -> Triple(minOf(sw - 16f, 380f), pillH + 56f, 28f)
-        Mode.Expanded -> Triple(minOf(sw - 12f, 440f), pillH + if (media == null) 132f else if (hasLyrics) 232f else 192f, 34f)
+        Mode.Expanded -> Triple(minOf(sw - 12f, 440f), pillH + 44f + when {
+            tab != 0 -> 290f
+            media == null -> 132f
+            hasLyrics -> 232f
+            else -> 192f
+        }, 34f)
     }
     val w = remember { Animatable(pillH) }
     val h = remember { Animatable(pillH) }
@@ -138,10 +146,21 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     // ---- close when touching outside, or after a few idle seconds
     var seenOutside by remember { mutableIntStateOf(Island.outsideTouches) }
     LaunchedEffect(Island.outsideTouches) {
-        if (Island.outsideTouches != seenOutside) { seenOutside = Island.outsideTouches; if (mode == Mode.Expanded || mode == Mode.Peek) mode = Mode.Collapsed }
+        if (Island.outsideTouches != seenOutside) {
+            seenOutside = Island.outsideTouches
+            // while typing, touches on the keyboard count as "outside" — ignore them
+            if (!Island.typing && (mode == Mode.Expanded || mode == Mode.Peek)) mode = Mode.Collapsed
+        }
     }
-    LaunchedEffect(mode, lastTouch) {
-        if (mode == Mode.Expanded && !demo) { delay(7000); mode = Mode.Collapsed }
+    LaunchedEffect(mode, lastTouch, Island.typing, tab) {
+        if (mode == Mode.Expanded && !demo && !Island.typing) { delay(if (tab == 0) 7000 else 20000); mode = Mode.Collapsed }
+    }
+    // a message pop-up (or the setup screen) asked to open a conversation
+    LaunchedEffect(Island.openChat) {
+        if (Island.openChat != null && mode != Mode.Intro) { tab = 1; peek = null; mode = Mode.Expanded }
+    }
+    LaunchedEffect(mode) {
+        if (mode != Mode.Expanded) { Island.typing = false; Island.openChat = null }
     }
 
     val open = mode == Mode.Expanded || mode == Mode.Peek
@@ -163,7 +182,13 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
                 .border(0.8.dp, if (open) GlassStroke else Color.Transparent, shape)
                 .clickable(remember { MutableInteractionSource() }, indication = null) {
                     lastTouch = SystemClock.elapsedRealtime()
-                    if (mode != Mode.Expanded) { peek = null; mode = Mode.Expanded }
+                    if (mode != Mode.Expanded) {
+                        val chat = (peek as? IslandEvent.Notification)?.chat
+                        tab = if (chat != null) 1 else if (media == null && Island.chats.any { it.unread > 0 }) 1 else 0
+                        if (chat != null) Island.openChat = chat
+                        peek = null
+                        mode = Mode.Expanded
+                    }
                 },
         ) {
             when (mode) {
@@ -173,7 +198,7 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
                     is IslandEvent.Charge -> ChargeCard(p, pillH)
                     else -> Collapsed(geo, pillH, camGap, media, accent, null)
                 }
-                Mode.Expanded -> Expanded(pillH, media, accent) { lastTouch = SystemClock.elapsedRealtime() }
+                Mode.Expanded -> Expanded(pillH, media, accent, tab, { tab = it; lastTouch = SystemClock.elapsedRealtime() }) { lastTouch = SystemClock.elapsedRealtime() }
                 Mode.Intro -> Unit
             }
         }
@@ -262,6 +287,10 @@ private fun NotificationCard(n: IslandEvent.Notification, pillH: Float) {
             Text2(n.title.ifBlank { n.app }, 14f, Fg, weight = FontWeight.SemiBold)
             if (n.text.isNotBlank()) Text2(n.text, 12.5f, FgDim)
         }
+        // chats: tap the island to open the conversation and reply right here
+        if (n.chat != null) Box(Modifier.padding(start = 8.dp).clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 11.dp, vertical = 5.dp)) {
+            Text2("Reply", 12f, Color.Black, weight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -317,13 +346,208 @@ private fun ChargeCard(c: IslandEvent.Charge, pillH: Float) {
 //  Expanded: media (artwork, progress, controls, karaoke lyrics) or a friendly idle face
 // =====================================================================================
 @Composable
-private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, touched: () -> Unit) {
+private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, setTab: (Int) -> Unit, touched: () -> Unit) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(200) } }
 
-    Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = (pillH + 2).dp, bottom = 14.dp)) {
-        AnimatedContent(media == null, transitionSpec = { (fadeIn(tween(250)) + scaleIn(initialScale = 0.96f)) togetherWith fadeOut(tween(150)) }, label = "exp") { idle ->
-            if (idle) IdlePanel() else media?.let { MediaPanel(it, accent, now, touched) }
+    Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = (pillH + 2).dp, bottom = 14.dp)) {
+        // Media · Chats · Search
+        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            TabPill(Ico.Music, "Media", tab == 0) { setTab(0) }
+            TabPill(Ico.Chat, "Chats", tab == 1, badge = Island.chats.any { it.unread > 0 }) { setTab(1) }
+            TabPill(Ico.Search, "Search", tab == 2) { setTab(2) }
+        }
+        AnimatedContent(tab, transitionSpec = { (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f)) togetherWith fadeOut(tween(120)) }, label = "tab") { t ->
+            when (t) {
+                1 -> ChatsPanel(touched)
+                2 -> SearchPanel(touched)
+                else -> AnimatedContent(media == null, transitionSpec = { (fadeIn(tween(250)) + scaleIn(initialScale = 0.96f)) togetherWith fadeOut(tween(150)) }, label = "exp") { idle ->
+                    if (idle) IdlePanel() else media?.let { MediaPanel(it, accent, now, touched) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabPill(icon: ImageVector, label: String, selected: Boolean, badge: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(12.dp)).background(if (selected) Glass else Color.Transparent)
+            .border(1.dp, if (selected) GlassStroke else Color.Transparent, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            Icon(icon, if (selected) Fg else FgFaint, 15f)
+            if (badge) Box(Modifier.align(Alignment.TopEnd).size(6.dp).clip(CircleShape).background(Green))
+        }
+        if (selected) Text2(label, 12f, Fg, Modifier.padding(start = 6.dp), weight = FontWeight.SemiBold)
+    }
+}
+
+// =====================================================================================
+//  Chats: WhatsApp / Instagram … conversations from notifications, reply inline
+// =====================================================================================
+@Composable
+private fun ChatsPanel(touched: () -> Unit) {
+    val open = Island.openChat
+    if (open != null) { ChatView(open, touched); return }
+    if (Island.chats.isEmpty()) {
+        Column(Modifier.fillMaxWidth().padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(46.dp).clip(CircleShape).background(Glass), contentAlignment = Alignment.Center) { Icon(Ico.Chat, Fg, 20f) }
+            Text2("No messages yet", 14.5f, Fg, Modifier.padding(top = 10.dp), weight = FontWeight.SemiBold)
+            Text2("WhatsApp and Instagram messages will show up here", 11.5f, FgDim)
+        }
+        return
+    }
+    androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(Island.chats.size) { i ->
+            val t = Island.chats[i]
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0x0FFFFFFF))
+                    .clickable { touched(); t.unread = 0; Island.openChat = t }.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(t, 36f)
+                Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                    Text2(t.title, 13.5f, Fg, weight = FontWeight.SemiBold)
+                    val last = t.messages.lastOrNull()
+                    Text2(if (last == null) "" else (if (last.mine) "You: " else "") + last.text, 12f, FgDim)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text2(t.app, 10f, FgFaint)
+                    if (t.unread > 0) Box(Modifier.padding(top = 4.dp).clip(CircleShape).background(Green).padding(horizontal = 6.dp, vertical = 1.dp)) {
+                        Text2("${t.unread}", 10f, Color.Black, weight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Avatar(t: com.windowsnotch.island.ChatThread, sizeDp: Float) {
+    Box(Modifier.size(sizeDp.dp)) {
+        Box(Modifier.fillMaxSize().clip(CircleShape).background(Color(0x26FFFFFF)), contentAlignment = Alignment.Center) {
+            val a = t.avatar
+            if (a != null) Image(a, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else Text2(t.title.take(1).uppercase(), (sizeDp * 0.4f), Fg, weight = FontWeight.Bold)
+        }
+        t.icon?.let { Image(it, null, Modifier.size((sizeDp * 0.42f).dp).align(Alignment.BottomEnd)) }
+    }
+}
+
+@Composable
+private fun ChatView(t: com.windowsnotch.island.ChatThread, touched: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var text by remember(t) { mutableStateOf("") }
+    var status by remember(t) { mutableStateOf("") }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(t.messages.size) { if (t.messages.isNotEmpty()) list.animateScrollToItem(t.messages.size - 1) }
+    LaunchedEffect(t) { t.unread = 0 }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable { touched(); Island.typing = false; Island.openChat = null }, contentAlignment = Alignment.Center) { Icon(Ico.Back, Fg, 17f) }
+            Avatar(t, 26f)
+            Text2(t.title, 14f, Fg, Modifier.padding(start = 8.dp).weight(1f), weight = FontWeight.SemiBold)
+            Text2(t.app, 10.5f, FgFaint)
+        }
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).padding(vertical = 6.dp), state = list, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            items(t.messages.size) { i ->
+                val m = t.messages[i]
+                Box(Modifier.fillMaxWidth(), contentAlignment = if (m.mine) Alignment.CenterEnd else Alignment.CenterStart) {
+                    Column(
+                        Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(15.dp)).background(if (m.mine) Color(0xFF1F8A3E) else Color(0x24FFFFFF))
+                            .padding(horizontal = 11.dp, vertical = 6.dp),
+                    ) {
+                        androidx.compose.material3.Text(m.text, color = Fg, fontSize = 13.sp)
+                        Text2(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.time)), 9.5f, FgFaint, Modifier.align(Alignment.End))
+                    }
+                }
+            }
+        }
+        if (status.isNotEmpty()) Text2(status, 10.5f, FgFaint, Modifier.padding(start = 6.dp, bottom = 4.dp))
+        val send = {
+            val msg = text.trim()
+            if (msg.isNotEmpty()) {
+                touched()
+                if (t.canReply && com.windowsnotch.island.Chats.reply(ctx, t, msg)) { status = "✓ Sent to ${t.title}"; text = ""; Island.react(EyeMood.Happy, 1200) }
+                else { status = "Opening ${t.app} — the reply option has expired"; com.windowsnotch.island.Chats.openApp(ctx, t) }
+            }
+        }
+        InputRow(text, { text = it; touched() }, if (t.canReply) "Reply to ${t.title}…" else "Reply (opens ${t.app})…", Ico.Send, send)
+    }
+}
+
+// =====================================================================================
+//  Search: YouTube suggestions, Play = top result in YouTube Music
+// =====================================================================================
+@Composable
+private fun SearchPanel(touched: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var q by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf(listOf<String>()) }
+    LaunchedEffect(q) {
+        if (q.isBlank()) { results = emptyList(); return@LaunchedEffect }
+        delay(220)
+        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.windowsnotch.island.YouTube.suggestions(q.trim()) }
+        results = (listOf(q.trim()) + r.filter { !it.equals(q.trim(), true) }).take(7)
+    }
+    val play = { s: String -> touched(); Island.typing = false; Island.react(EyeMood.Happy, 1200); com.windowsnotch.island.YouTube.play(ctx, s) }
+    Column(Modifier.fillMaxSize()) {
+        InputRow(q, { q = it; touched() }, "Search a song or artist…", Ico.Play) { if (q.isNotBlank()) play(q.trim()) }
+        if (results.isEmpty()) Text2("Type to see suggestions · Play starts it in YouTube Music", 11.5f, FgFaint, Modifier.padding(top = 18.dp).align(Alignment.CenterHorizontally))
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            items(results.size) { i ->
+                val s = results[i]
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(Color(0x0FFFFFFF)).clickable { play(s) }.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Ico.Music, FgDim, 15f)
+                    Text2(s, 13f, Fg, Modifier.padding(start = 10.dp).weight(1f))
+                    Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x26FFFFFF)).clickable { touched(); Island.typing = false; com.windowsnotch.island.YouTube.search(ctx, s) }
+                        .padding(horizontal = 9.dp, vertical = 3.dp)) { Text2("YouTube", 10.5f, Fg, weight = FontWeight.SemiBold) }
+                    Box(Modifier.padding(start = 6.dp).size(26.dp).clip(CircleShape).background(Color.White).clickable { play(s) }, contentAlignment = Alignment.Center) {
+                        Icon(Ico.Play, Color.Black, 15f)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A pill text field. The overlay window normally can't take the keyboard, so the first tap switches the
+ * island into typing mode (window becomes focusable), then focuses the field and shows the keyboard.
+ */
+@Composable
+private fun InputRow(value: String, onChange: (String) -> Unit, hint: String, actionIcon: ImageVector, onAction: () -> Unit) {
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val fm = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(Island.typing) {
+        if (Island.typing) { delay(120); runCatching { focus.requestFocus() }; kb?.show() } else { fm.clearFocus(); kb?.hide() }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(19.dp)).background(Color(0x1AFFFFFF)).border(1.dp, GlassStroke, RoundedCornerShape(19.dp))
+                .clickable(enabled = !Island.typing) { Island.typing = true }.padding(horizontal = 14.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (value.isEmpty()) Text2(hint, 13f, FgFaint)
+            androidx.compose.foundation.text.BasicTextField(
+                value, onChange, Modifier.fillMaxWidth().focusRequester(focus),
+                enabled = Island.typing, singleLine = true,
+                textStyle = TextStyle(color = Fg, fontSize = 13.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Fg),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { onAction() }, onDone = { onAction() }, onSearch = { onAction() }),
+            )
+        }
+        Box(Modifier.padding(start = 8.dp).size(38.dp).clip(CircleShape).background(Color.White).clickable { onAction() }, contentAlignment = Alignment.Center) {
+            Icon(actionIcon, Color.Black, 18f)
         }
     }
 }

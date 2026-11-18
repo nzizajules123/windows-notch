@@ -334,6 +334,18 @@
                                     <RadioButton x:Name="TabMedia" Style="{StaticResource TabButton}" GroupName="tabs" Tag="0" IsChecked="True" Checked="Tab_Checked" ToolTip="Media">
                                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Media"/></StackPanel>
                                     </RadioButton>
+                                    <RadioButton x:Name="TabChats" Style="{StaticResource TabButton}" GroupName="tabs" Tag="4" Checked="Tab_Checked" ToolTip="Chats">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE8BD;" FontSize="12.5"/>
+                                                <Ellipse x:Name="ChatsBadge" Width="6" Height="6" Fill="#FF30D158" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0" Visibility="Collapsed"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource TabLabel}" Text="Chats"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <RadioButton x:Name="TabSearch" Style="{StaticResource TabButton}" GroupName="tabs" Tag="5" Checked="Tab_Checked" ToolTip="Search music">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE721;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Search"/></StackPanel>
+                                    </RadioButton>
                                     <RadioButton x:Name="TabApps" Style="{StaticResource TabButton}" GroupName="tabs" Tag="1" Checked="Tab_Checked" ToolTip="Apps">
                                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE71D;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Apps"/></StackPanel>
                                     </RadioButton>
@@ -533,6 +545,148 @@
                                     </Grid>
                                 </Border>
                             </Grid>
+                        </Grid>
+
+                        <!-- ===== CHATS (WhatsApp / Instagram … from notifications) ===== -->
+                        <Grid x:Name="ChatsPanel" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
+                            <StackPanel x:Name="ChatsEmpty" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <Border Width="46" Height="46" CornerRadius="23" Background="#1FFFFFFF" HorizontalAlignment="Center">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE8BD;" FontSize="19"/>
+                                </Border>
+                                <TextBlock Text="No messages yet" FontSize="14.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,3"/>
+                                <TextBlock Text="WhatsApp and Instagram messages you receive will show up here, ready to reply"
+                                           FontSize="11.5" Foreground="{StaticResource FgDim}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- list of conversations -->
+                            <ScrollViewer x:Name="ChatsListHost" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+                                <ItemsControl x:Name="ChatsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Style="{StaticResource RowButton}" Margin="0,0,0,6" Padding="10,8"
+                                                    Click="ChatRow_Click" Tag="{Binding}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid Width="34" Height="34">
+                                                        <Border CornerRadius="17" Background="#26FFFFFF">
+                                                            <TextBlock Text="{Binding Initial}" FontWeight="Bold" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        </Border>
+                                                        <Image Source="{Binding Icon}" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2"/>
+                                                    </Grid>
+                                                    <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Title}" FontSize="12.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding LastText}" FontSize="11.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" Foreground="{StaticResource FgFaint}" HorizontalAlignment="Right"/>
+                                                        <Border Background="#FF30D158" CornerRadius="7" MinWidth="14" Height="14" HorizontalAlignment="Right" Margin="0,4,0,0"
+                                                                Visibility="{Binding HasUnread}" Padding="4,0">
+                                                            <TextBlock Text="{Binding Unread}" FontSize="9.5" FontWeight="Bold" Foreground="Black" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+
+                            <!-- one conversation + reply box -->
+                            <Grid x:Name="ChatView" Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Margin="0,0,0,6">
+                                    <Button Style="{StaticResource IconButton}" Width="26" Height="26" HorizontalAlignment="Left" Click="ChatBack_Click" ToolTip="All chats">
+                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE72B;" FontSize="11"/>
+                                    </Button>
+                                    <StackPanel Margin="34,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock x:Name="ChatTitle" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="320"/>
+                                        <TextBlock x:Name="ChatApp" FontSize="11" Foreground="{StaticResource FgFaint}" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                                <ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Hidden">
+                                    <ItemsControl x:Name="ChatMessages">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border x:Name="bubble" HorizontalAlignment="{Binding Align}" MaxWidth="380" Margin="0,0,0,5" Padding="11,6"
+                                                        CornerRadius="14" Background="#24FFFFFF">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Text}" FontSize="12.5" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{Binding TimeText}" FontSize="9.5" Foreground="{StaticResource FgFaint}" HorizontalAlignment="Right" Margin="0,2,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding Mine}" Value="True">
+                                                        <Setter TargetName="bubble" Property="Background" Value="#FF1F8A3E"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <Grid Grid.Row="2" Margin="0,6,0,0">
+                                    <Border CornerRadius="17" Background="#1AFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1" Height="34" Margin="0,0,42,0">
+                                        <Grid>
+                                            <TextBlock x:Name="ReplyHint" Text="Reply…" FontSize="12.5" Foreground="{StaticResource FgFaint}" Margin="14,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                            <TextBox x:Name="ReplyBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
+                                                     FontSize="12.5" Margin="10,0" VerticalAlignment="Center" PreviewMouseDown="TypingBox_MouseDown"
+                                                     TextChanged="ReplyBox_TextChanged" KeyDown="ReplyBox_KeyDown" LostKeyboardFocus="TypingBox_LostFocus"/>
+                                        </Grid>
+                                    </Border>
+                                    <Button x:Name="ReplySend" Style="{StaticResource PlayButton}" Width="34" Height="34" HorizontalAlignment="Right" Click="ReplySend_Click" ToolTip="Send">
+                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE724;" FontSize="13" Foreground="Black"/>
+                                    </Button>
+                                </Grid>
+                                <TextBlock x:Name="ReplyStatus" Grid.Row="2" FontSize="10.5" Foreground="{StaticResource FgFaint}" Margin="14,40,0,-16" Visibility="Collapsed"/>
+                            </Grid>
+                        </Grid>
+
+                        <!-- ===== MUSIC SEARCH (YouTube) ===== -->
+                        <Grid x:Name="SearchPanel" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border CornerRadius="18" Background="#1AFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1" Height="38">
+                                <Grid>
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE721;" FontSize="13" Foreground="{StaticResource FgDim}" HorizontalAlignment="Left" Margin="14,0,0,0"/>
+                                    <TextBlock x:Name="SearchHint" Text="Search a song or artist on YouTube…" FontSize="13" Foreground="{StaticResource FgFaint}"
+                                               Margin="38,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                    <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
+                                             FontSize="13" Margin="34,0,12,0" VerticalAlignment="Center" PreviewMouseDown="TypingBox_MouseDown"
+                                             TextChanged="SearchBox_TextChanged" KeyDown="SearchBox_KeyDown" LostKeyboardFocus="TypingBox_LostFocus"/>
+                                </Grid>
+                            </Border>
+                            <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Hidden">
+                                <ItemsControl x:Name="SuggestionList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,0,0,4">
+                                                <Button Style="{StaticResource RowButton}" Padding="12,8" Click="Suggestion_Click" Tag="{Binding}"
+                                                        ToolTip="Open on YouTube">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE8D6;" FontSize="12" Foreground="{StaticResource FgDim}"/>
+                                                        <TextBlock Text="{Binding}" FontSize="12.5" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="380"/>
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button Style="{StaticResource ChipButton}" HorizontalAlignment="Right" Margin="0,0,8,0" Click="SuggestionMusic_Click" Tag="{Binding}"
+                                                        ToolTip="Open on YouTube Music">
+                                                    <TextBlock Text="YT Music" FontSize="10.5" FontWeight="SemiBold"/>
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <TextBlock x:Name="SearchEmpty" Grid.Row="1" Text="Type to see suggestions · Enter opens YouTube" FontSize="11.5"
+                                       Foreground="{StaticResource FgFaint}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
 
                         <!-- ===== APPS ===== -->

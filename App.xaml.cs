@@ -42,6 +42,28 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length >= 1 && e.Args[0] == "--reply-test")
+        {
+            // QA: wait for a chat toast, reply through it, log the result, exit
+            var chats = new Services.ChatService();
+            var watcher = new Services.NotificationWatcher();
+            watcher.Received += t => Dispatcher.BeginInvoke(async () =>
+            {
+                var app = Services.ChatService.MessengerOf(t);
+                Log($"reply-test: toast app={t.App} messenger={app} title={t.Title} body={t.Body} replyBox={(t.ReplyBox != null)} send={(t.SendButton != null)}");
+                if (app == null) return;
+                var thread = chats.Add(app, t, null);
+                var r = await chats.ReplyAsync(thread, "On my way 🚀 (sent from the notch)");
+                Log("reply-test: result " + r);
+                Shutdown();
+            });
+            watcher.Start();
+            var stop = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(25) };
+            stop.Tick += (_, _) => { Log("reply-test: timeout"); Shutdown(); };
+            stop.Start();
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            return;
+        }
         if (e.Args.Length >= 1 && e.Args[0] == "--lyrics-test")
         {
             // QA: resolve lyrics for "title|artist|seconds|spotify?" lines in a file, write results next to it.

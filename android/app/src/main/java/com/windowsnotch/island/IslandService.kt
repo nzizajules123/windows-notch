@@ -16,6 +16,9 @@ import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -46,7 +49,7 @@ data class Geo(
  */
 class IslandService : AccessibilityService() {
 
-    private var view: ComposeView? = null
+    private var view: android.view.View? = null
     private var params: WindowManager.LayoutParams? = null
     private val owner = OverlayOwner()
     private val geo = mutableStateOf(Geo(400f, 0f, 0f, 0f, 24f, false))
@@ -61,6 +64,20 @@ class IslandService : AccessibilityService() {
         addOverlay()
         registerReceivers()
         Island.overlayRunning = true
+        // while a text field in the island is focused, the window must accept the keyboard
+        owner.lifecycleScope.launch {
+            snapshotFlow { Island.typing }.collect { typing -> setFocusable(typing) }
+        }
+    }
+
+    private fun setFocusable(on: Boolean) {
+        val p = params ?: return
+        val v = view ?: return
+        p.flags = if (on) p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                  else p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or
+            (if (on) WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
+        runCatching { wm.updateViewLayout(v, p) }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -102,10 +119,22 @@ class IslandService : AccessibilityService() {
             y = 0
         }
         params = p
-        val v = ComposeView(this).apply {
+        val compose = ComposeView(this).apply { setContent { IslandRoot(geo = geo.value) } }
+        // container: Back closes the keyboard / conversation instead of being lost
+        val v = object : android.widget.FrameLayout(this) {
+            override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+                if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK && (Island.typing || Island.openChat != null)) {
+                    if (event.action == android.view.KeyEvent.ACTION_UP) {
+                        if (Island.typing) Island.typing = false else Island.openChat = null
+                    }
+                    return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+        }.apply {
+            addView(compose)
             setViewTreeLifecycleOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
-            setContent { IslandRoot(geo = geo.value) }
             setOnTouchListener { _, ev ->
                 if (ev.action == MotionEvent.ACTION_OUTSIDE) Island.outsideTouches++
                 false
