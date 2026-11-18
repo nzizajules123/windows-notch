@@ -39,6 +39,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -100,6 +103,7 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     val camGap = if (geo.hasCutout) geo.cutoutWidthDp + 12f else 40f
     val sw = geo.screenWidthDp
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var mode by remember { mutableStateOf(if (demo) Mode.Collapsed else Mode.Intro) }
     var peek by remember { mutableStateOf<IslandEvent?>(null) }
     var lastTouch by remember { mutableLongStateOf(0L) }
@@ -115,7 +119,7 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     val (tw, th, tr) = when (mode) {
         Mode.Intro -> Triple(pillH, pillH, pillH / 2)
         Mode.Collapsed -> if (volume != null) Triple(minOf(sw - 24f, 300f), pillH, pillH / 2) else Triple(camGap + 2 * slot, pillH, pillH / 2)
-        Mode.Peek -> Triple(minOf(sw - 16f, 380f), pillH + 56f, 28f)
+        Mode.Peek -> Triple(minOf(sw - 16f, 390f), pillH + if (peek is IslandEvent.Notification) 96f else 56f, 28f)
         Mode.Expanded -> Triple(minOf(sw - 12f, 440f), pillH + 44f + when {
             tab != 0 -> 290f
             media == null -> 132f
@@ -172,7 +176,16 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
             return@Box
         }
 
+        // the eyes' speech bubble pops out under the pill
+        var bubble by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Island.speechId) {
+            val s = Island.speech ?: return@LaunchedEffect
+            bubble = s
+            delay(2700)
+            bubble = null
+        }
         val shape = RoundedCornerShape(r.value.dp)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
                 .size(w.value.dp, h.value.dp)
@@ -194,13 +207,31 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
             when (mode) {
                 Mode.Collapsed -> Collapsed(geo, pillH, camGap, media, accent, volume)
                 Mode.Peek -> when (val p = peek) {
-                    is IslandEvent.Notification -> NotificationCard(p, pillH)
+                    is IslandEvent.Notification -> NotificationCard(
+                        p, pillH,
+                        onReply = { p.chat?.let { Island.openChat = it } },
+                        onOpen = {
+                            ctx.packageManager.getLaunchIntentForPackage(p.pkg)?.let {
+                                it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK); runCatching { ctx.startActivity(it) }
+                            }
+                            peek = null; mode = Mode.Collapsed
+                        },
+                        onDismiss = { peek = null; mode = Mode.Collapsed },
+                    )
                     is IslandEvent.Charge -> ChargeCard(p, pillH)
                     else -> Collapsed(geo, pillH, camGap, media, accent, null)
                 }
                 Mode.Expanded -> Expanded(pillH, media, accent, tab, { tab = it; lastTouch = SystemClock.elapsedRealtime() }) { lastTouch = SystemClock.elapsedRealtime() }
                 Mode.Intro -> Unit
             }
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = bubble != null && mode == Mode.Collapsed,
+            enter = fadeIn(tween(160)) + scaleIn(spring(0.5f, 500f), initialScale = 0.5f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)),
+            exit = fadeOut(tween(180)) + androidx.compose.animation.scaleOut(targetScale = 0.85f),
+        ) {
+            SpeechBubble(bubble ?: "")
+        }
         }
     }
 }
@@ -277,20 +308,75 @@ private fun Collapsed(geo: Geo, pillH: Float, camGap: Float, media: MediaInfo?, 
 //  Peek cards
 // =====================================================================================
 @Composable
-private fun NotificationCard(n: IslandEvent.Notification, pillH: Float) {
-    Row(Modifier.fillMaxSize().padding(start = 12.dp, end = 16.dp, top = (pillH - 2).dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(Glass).border(1.dp, GlassStroke, RoundedCornerShape(13.dp)), contentAlignment = Alignment.Center) {
-            if (n.icon != null) Image(n.icon, null, Modifier.size(28.dp)) else Icon(Ico.Bell, Fg, 20f)
+private fun NotificationCard(n: IslandEvent.Notification, pillH: Float, onReply: () -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    // tint everything with the app's own colour
+    val tint = remember(n) { n.icon?.let { runCatching { com.windowsnotch.island.Colors.accentOf(it.asAndroidBitmap()) }.getOrNull() } ?: Green }
+    val left = remember(n) { Animatable(1f) }
+    LaunchedEffect(n) { left.animateTo(0f, tween(4800, easing = LinearEasing)) }
+    val iconPop = remember(n) { Animatable(0.4f) }
+    LaunchedEffect(n) { iconPop.animateTo(1f, spring(0.42f, 380f)) }
+
+    Box(Modifier.fillMaxSize()) {
+        // soft glow behind the icon
+        Canvas(Modifier.size(150.dp).offset((-40).dp, (pillH - 50).dp)) {
+            drawCircle(Brush.radialGradient(listOf(tint.copy(alpha = 0.35f), Color.Transparent)))
         }
-        Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Text2("${n.app}  ·  now", 10.5f, FgFaint, weight = FontWeight.SemiBold)
-            Text2(n.title.ifBlank { n.app }, 14f, Fg, weight = FontWeight.SemiBold)
-            if (n.text.isNotBlank()) Text2(n.text, 12.5f, FgDim)
+        Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 10.dp, top = (pillH - 2).dp, bottom = 10.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    Modifier.size(44.dp).graphicsLayer { scaleX = iconPop.value; scaleY = iconPop.value }
+                        .clip(RoundedCornerShape(14.dp)).background(Color(0x1AFFFFFF)).border(1.dp, Color(0x2BFFFFFF), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (n.icon != null) Image(n.icon, null, Modifier.size(28.dp)) else Icon(Ico.Bell, Fg, 20f)
+                }
+                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text2(n.app, 11f, lerpC(tint, Color.White, 0.25f), weight = FontWeight.SemiBold)
+                        Text2("  ·  now", 11f, FgFaint)
+                    }
+                    Text2(n.title.ifBlank { n.app }, 14.5f, Fg, weight = FontWeight.SemiBold)
+                    if (n.text.isNotBlank()) androidx.compose.material3.Text(
+                        n.text, color = FgDim, fontSize = 12.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp,
+                    )
+                }
+                Box(Modifier.size(28.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
+                    Text2("✕", 12f, FgDim)
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.padding(start = 56.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (n.chat != null) Chip("↩  Reply", onReply)
+                if (n.pkg.isNotEmpty()) Chip(if (n.app.length <= 14) "Open ${n.app}" else "Open", onOpen)
+            }
         }
-        // chats: tap the island to open the conversation and reply right here
-        if (n.chat != null) Box(Modifier.padding(start = 8.dp).clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 11.dp, vertical = 5.dp)) {
-            Text2("Reply", 12f, Color.Black, weight = FontWeight.SemiBold)
+        // countdown before it closes
+        Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp, vertical = 6.dp).fillMaxWidth().height(2.5.dp).clip(CircleShape).background(Color(0x12FFFFFF))) {
+            Box(Modifier.fillMaxWidth(left.value).height(2.5.dp).clip(CircleShape).background(tint))
         }
+    }
+}
+
+@Composable
+private fun Chip(label: String, onClick: () -> Unit) =
+    Box(Modifier.clip(RoundedCornerShape(11.dp)).background(Color(0x26FFFFFF)).clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 5.dp)) {
+        Text2(label, 11.5f, Fg, weight = FontWeight.SemiBold)
+    }
+
+@Composable
+private fun SpeechBubble(text: String) {
+    Column(Modifier.padding(top = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(Modifier.size(14.dp, 7.dp)) {
+            val p = Path().apply {
+                moveTo(0f, size.height); cubicTo(size.width * 0.3f, size.height, size.width * 0.38f, 0f, size.width / 2, 0f)
+                cubicTo(size.width * 0.62f, 0f, size.width * 0.7f, size.height, size.width, size.height); close()
+            }
+            drawPath(p, Color(0xFA1E1E24))
+        }
+        Box(
+            Modifier.shadow(10.dp, RoundedCornerShape(15.dp)).clip(RoundedCornerShape(15.dp)).background(Color(0xFA1E1E24))
+                .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(15.dp)).padding(horizontal = 13.dp, vertical = 6.dp),
+        ) { Text2(text, 12.5f, Fg, weight = FontWeight.SemiBold) }
     }
 }
 
@@ -595,7 +681,11 @@ private fun IdlePanel() {
         Column(Modifier.padding(start = 16.dp)) {
             Text2(SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(Date()), 15f, Fg, weight = FontWeight.SemiBold)
             Text2("Nothing playing  ·  ${Island.battery}%${if (Island.charging) " charging" else ""}", 12.5f, FgDim)
-            Text2("Tap the eyes to poke them, double-tap to wink", 11f, FgFaint, Modifier.padding(top = 6.dp))
+            // the eyes' latest words show here while the island is open
+            var said by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Island.speechId) { said = Island.speech; delay(2600); said = null }
+            Text2(said ?: "Tap the eyes to poke them, double-tap to wink", if (said != null) 13f else 11f,
+                if (said != null) Fg else FgFaint, Modifier.padding(top = 6.dp), weight = if (said != null) FontWeight.SemiBold else FontWeight.Normal)
         }
     }
 }

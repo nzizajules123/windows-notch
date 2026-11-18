@@ -118,6 +118,14 @@ fun Eyes(
     val pupil by animateFloatAsState(when (mood) { EyeMood.Surprised -> 0.65f; EyeMood.Angry -> 0.75f; else -> 1f }, spring(0.5f, 300f), label = "pupil")
     val ball by animateFloatAsState(if (mood == EyeMood.Surprised) 1.16f else 1f, spring(0.4f, 400f), label = "ball")
     val heart by animateFloatAsState(if (mood == EyeMood.Love) 1f else 0f, spring(0.45f, 350f), label = "heart")
+    // eyebrows: lift (fraction of the eye radius, negative = up) and inner-end tilt (degrees)
+    val browLift by animateFloatAsState(when (mood) {
+        EyeMood.Surprised -> -0.5f; EyeMood.Happy -> -0.22f; EyeMood.Love -> -0.3f; EyeMood.Sad -> -0.12f
+        EyeMood.Angry -> 0.2f; EyeMood.Sleepy -> 0.28f; else -> 0f
+    }, spring(0.5f, 300f), label = "browLift")
+    val browTilt by animateFloatAsState(when (mood) {
+        EyeMood.Sad -> -18f; EyeMood.Angry -> 20f; EyeMood.Happy -> -6f; EyeMood.Love -> -8f; else -> 0f
+    }, spring(0.5f, 300f), label = "browTilt")
     val irisColor = if (mood == EyeMood.Angry) lerp(iris, Color(0xFFFF3B30), 0.6f) else iris
 
     // bob to the music
@@ -126,12 +134,13 @@ fun Eyes(
     val bob by bobT.animateFloat(-1f, 1f, infiniteRepeatable(tween(430, easing = LinearEasing), RepeatMode.Reverse), label = "bobY")
 
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    var mod = modifier.size(eyeSize * 2 + gap + 4.dp, eyeSize + 6.dp)
+    var mod = modifier.size(eyeSize * 2 + gap + 4.dp, eyeSize + eyeSize * 0.6f + 6.dp)
     if (interactive) mod = mod.pointerInput(Unit) {
         detectTapGestures(
             onDoubleTap = {
                 scope.launch { wink.animateTo(1f, tween(90)); delay(520); wink.animateTo(0f, tween(160)) }
                 localMood = EyeMood.Love; localUntil = SystemClock.elapsedRealtime() + 1300
+                Island.say(Island.pick("Hehe 😉", "Love you too ❤️", "You're the best 💖"))
             },
             onTap = {
                 val t = SystemClock.elapsedRealtime()
@@ -142,8 +151,8 @@ fun Eyes(
                     shake.animateTo(0f, keyframes { durationMillis = 420; -2.2f at 60; 2.2f at 130; -1.6f at 200; 1.2f at 270; 0f at 420 })
                 }
                 scope.launch { pop.snapTo(0.82f); pop.animateTo(1f, spring(0.4f, 500f)) }
-                if (pokes >= 4) { localMood = EyeMood.Angry; localUntil = t + 2200; pokes = 0 }
-                else { localMood = EyeMood.Surprised; localUntil = t + 950 }
+                if (pokes >= 4) { localMood = EyeMood.Angry; localUntil = t + 2200; pokes = 0; Island.say(Island.pick("Stop it! 😤", "Hey, not cool 😠")) }
+                else { localMood = EyeMood.Surprised; localUntil = t + 950; Island.say(Island.pick("Ouch!", "Boop! 👉", "Hey! 😳", "That tickles 😆", "Hehe")) }
             },
         )
     }
@@ -151,7 +160,7 @@ fun Eyes(
     Canvas(mod) {
         val r = eyeSize.toPx() / 2
         val g = gap.toPx()
-        val cy = size.height / 2 + (if (playing) bob * 0.9f * density else 0f)
+        val cy = size.height - r - 3 * density + (if (playing) bob * 0.9f * density else 0f)
         val cx0 = size.width / 2 - g / 2 - r + shake.value * density
         val look = Offset(lookX.value, lookY.value)
         scale(pop.value, pop.value) {
@@ -159,6 +168,17 @@ fun Eyes(
                 val c = Offset(cx0 + i * (2 * r + g), cy)
                 val closed = maxOf(upper, blink.value, if (i == 1) wink.value else 0f)
                 drawEye(c, r * ball, look, closed, lower, if (i == 0) tilt else -tilt, pupil, heart, irisColor, lidColor)
+                // eyebrow: a soft arc above the eye, tilted around its inner end
+                val by = c.y - r * 1.55f + browLift * r
+                val inner = if (i == 0) Offset(c.x + r * 0.9f, by) else Offset(c.x - r * 0.9f, by)
+                rotate(if (i == 0) browTilt else -browTilt, pivot = inner) {
+                    val brow = Path().apply {
+                        moveTo(c.x - r * 0.9f, by + r * 0.18f)
+                        quadraticBezierTo(c.x, by - r * 0.32f, c.x + r * 0.9f, by + r * 0.18f)
+                    }
+                    drawPath(brow, Color(0xE6F2F4F8).copy(alpha = if (mood == EyeMood.Sleepy) 0.55f else 0.92f),
+                        style = Stroke(width = r * 0.26f, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                }
             }
         }
     }

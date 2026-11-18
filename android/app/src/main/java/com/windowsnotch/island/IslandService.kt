@@ -60,6 +60,8 @@ class IslandService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Island.lyricsEnabled = getSharedPreferences("island", MODE_PRIVATE).getBoolean("lyrics", true)
+        Island.talk = getSharedPreferences("island", MODE_PRIVATE).getBoolean("talk", true)
+        android.os.Handler(mainLooper).postDelayed({ Island.say(Island.greeting()) }, 3600)   // after the droplet intro
         owner.start()
         addOverlay()
         registerReceivers()
@@ -194,6 +196,9 @@ class IslandService : AccessibilityService() {
                     Island.charging = on
                     Island.post(IslandEvent.Charge(on, Island.battery))
                     Island.react(if (on) EyeMood.Love else EyeMood.Surprised, 1800)
+                    android.os.Handler(mainLooper).postDelayed({
+                        Island.say(if (on) Island.pick("Yum, power ⚡", "Charging up! 🔋") else Island.pick("Unplugged! I'll be careful 🔋", "Running free 🏃"))
+                    }, 4200)
                 }
                 "android.media.VOLUME_CHANGED_ACTION" -> {
                     if (i.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != AudioManager.STREAM_MUSIC) return

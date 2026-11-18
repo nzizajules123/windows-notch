@@ -50,6 +50,25 @@ sleepy (muted, very dim screen, battery ≤ 15 %) and sad (internet lost, device
 
 ![](docs/screenshots/eyes-zoom.png)
 
+### The eyes talk
+
+The eyes have expressive **eyebrows** (raised when surprised, tilted when sad or angry) and a sparkle that twinkles now and
+then. They talk in little **speech bubbles** under the pill:
+
+- **Hover** → "Hi! 👋", "Hello there!"…; **poke** → "Ouch!", "Boop! 👉", "That tickles 😆"; four quick pokes → "Stop it! 😤";
+  **double-click** → "Hehe 😉".
+- A time-of-day greeting when the notch starts, "Welcome back! 👋" when you unlock, "Yum, power ⚡" when you plug in,
+  "Ooh, nice track 🎶", "On it! 💪" when work starts, "Done! ✅" when it finishes, "Battery's low 🥺".
+- Every so often, while things are calm, a friendly nudge ("Stay hydrated 💧", "Time to stretch? 🧘").
+- Turn it off with **Control → Eyes talk**.
+
+### Notifications
+
+Each notification is a card: the app's icon on a glow in the app's own colour, its tinted name, a bold title and a
+two-line message, with **Reply** (chats), **Open <app>** and **✕**. A thin countdown bar shows when it will close, and it
+pauses while your mouse is on the card. Notifications that arrive together queue up ("+2 more") instead of replacing
+each other. Click the card to open it in the notch.
+
 ### Look
 
 The island is solid black while small and dark smoked glass when open, with smooth rounded corners. Gradients are kept to a

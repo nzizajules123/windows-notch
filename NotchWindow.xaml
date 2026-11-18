@@ -271,6 +271,73 @@
                         <ui:EqualizerBars x:Name="PeekEq" Grid.Column="2" BarHeight="18" BarWidth="3.5"/>
                     </Grid>
 
+                    <!-- ===================== NOTIFICATION CARD ===================== -->
+                    <Grid x:Name="NotifView" Opacity="0" Visibility="Collapsed" Background="Transparent" Cursor="Hand"
+                          MouseLeftButtonUp="NotifView_Click">
+                        <!-- soft glow in the app's colour behind the icon -->
+                        <Ellipse Width="150" Height="150" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-46,-52,0,0" IsHitTestVisible="False">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush>
+                                    <GradientStop x:Name="NotifGlowStop" Color="#5530D158" Offset="0"/>
+                                    <GradientStop Color="#0030D158" Offset="1"/>
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Grid Margin="14,12,12,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.RowSpan="2" Width="46" Height="46" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5">
+                                <Grid.RenderTransform><ScaleTransform x:Name="NotifIconScale"/></Grid.RenderTransform>
+                                <Border CornerRadius="14" Background="#1AFFFFFF" BorderBrush="#2BFFFFFF" BorderThickness="1">
+                                    <Grid>
+                                        <TextBlock x:Name="NotifGlyph" Style="{StaticResource Glyph}" Text="&#xEA8F;" FontSize="19"/>
+                                        <Image x:Name="NotifIcon" Width="30" Height="30" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <StackPanel x:Name="NotifText" Grid.Column="1" Margin="13,0,8,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="NotifApp" FontSize="11" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="NotifWhen" Text="  ·  now" FontSize="11" Foreground="{StaticResource FgFaint}"/>
+                                    <Border x:Name="NotifMore" CornerRadius="7" Background="#26FFFFFF" Padding="6,0" Margin="8,0,0,0" Visibility="Collapsed">
+                                        <TextBlock x:Name="NotifMoreText" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock x:Name="NotifTitle" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                <TextBlock x:Name="NotifBody" FontSize="12.5" Foreground="{StaticResource FgDim}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                           MaxHeight="34" Margin="0,1,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="24" Height="24" VerticalAlignment="Top" Click="NotifDismiss_Click" ToolTip="Dismiss">
+                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}"/>
+                            </Button>
+                            <StackPanel x:Name="NotifActions" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="13,8,0,0">
+                                <Button x:Name="NotifReply" Style="{StaticResource ChipButton}" Click="NotifReply_Click" Margin="0,0,6,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE97A;" FontSize="10" Margin="0,0,5,0"/>
+                                        <TextBlock Text="Reply" FontSize="11" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="NotifOpen" Style="{StaticResource ChipButton}" Click="NotifOpen_Click">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE8A7;" FontSize="10" Margin="0,0,5,0"/>
+                                        <TextBlock x:Name="NotifOpenText" Text="Open" FontSize="11" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                        <!-- time left before it closes (pauses while you hover) -->
+                        <Border x:Name="NotifTimerTrack" Height="2.5" VerticalAlignment="Bottom" Margin="26,0,26,6" CornerRadius="1.25" Background="#12FFFFFF" IsHitTestVisible="False">
+                            <Border x:Name="NotifTimer" HorizontalAlignment="Left" CornerRadius="1.25" Background="#FF30D158"/>
+                        </Border>
+                    </Grid>
+
                     <!-- ===================== POWER (charger plugged / unplugged) ===================== -->
                     <Grid x:Name="ChargeView" Opacity="0" Visibility="Collapsed" Margin="14,10,20,10">
                         <Grid.ColumnDefinitions>
@@ -1015,6 +1082,10 @@
                                         <CheckBox x:Name="StartupSwitch" Style="{StaticResource Switch}" Click="StartupSwitch_Click"/>
                                         <TextBlock Text="Start with Windows" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <CheckBox x:Name="TalkSwitch" Style="{StaticResource Switch}" Click="TalkSwitch_Click"/>
+                                        <TextBlock Text="Eyes talk" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
                                     <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Padding="10,4" Margin="0,6,0,0" Click="Quit_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>
@@ -1072,5 +1143,21 @@
 
             <Path x:Name="EarR" Data="M12,0 L0,0 L0,12 A12,12 0 0 1 12,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
         </StackPanel>
+
+        <!-- the eyes' speech bubble (pops out under the pill) -->
+        <Grid x:Name="Bubble" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,38,0,0" Visibility="Collapsed"
+              IsHitTestVisible="False" RenderTransformOrigin="0.5,0">
+            <Grid.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="BubbleScale"/>
+                    <TranslateTransform x:Name="BubbleY"/>
+                </TransformGroup>
+            </Grid.RenderTransform>
+            <Grid.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.45"/></Grid.Effect>
+            <Path Data="M0,7 C4,7 5,0 7,0 C9,0 10,7 14,7 Z" Fill="#FA1E1E24" HorizontalAlignment="Center" VerticalAlignment="Top" Width="14" Height="7"/>
+            <Border Margin="0,6,0,0" CornerRadius="15" Background="#FA1E1E24" BorderBrush="#2EFFFFFF" BorderThickness="1" Padding="13,6,13,7">
+                <TextBlock x:Name="BubbleText" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Fg}"/>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

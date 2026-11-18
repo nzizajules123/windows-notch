@@ -18,7 +18,7 @@ public enum EyeMood { Neutral, Happy, Surprised, Sleepy, Sad, Love, Angry }
 /// </summary>
 public sealed class NotchEyes : Grid
 {
-    private const double D = 13.5, Gap = 7;      // eyeball diameter / distance between eyes
+    private const double D = 12.5, Gap = 7;      // eyeball diameter / distance between eyes
     private static readonly Color Lid = Color.FromRgb(0, 0, 0);
 
     private readonly Eye _left, _right;
@@ -48,12 +48,31 @@ public sealed class NotchEyes : Grid
         var face = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
         face.RenderTransform = new TransformGroup { Children = { _bob, _shake } };
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 5, 0, 0) };
         _left = new Eye(this, isLeft: true);
         _right = new Eye(this, isLeft: false) { Margin = new Thickness(Gap, 0, 0, 0) };
         row.Children.Add(_left);
         row.Children.Add(_right);
         face.Children.Add(row);
+
+        // eyebrows: they carry most of the expression
+        var brows = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center };
+        _browL = Brow(isLeft: true, out _browLRot, out _browLY);
+        _browR = Brow(isLeft: false, out _browRRot, out _browRY);
+        _browR.Margin = new Thickness(Gap, 0, 0, 0);
+        brows.Children.Add(_browL);
+        brows.Children.Add(_browR);
+        face.Children.Add(brows);
+
+        // a little sparkle that twinkles now and then
+        _sparkle = new Path
+        {
+            Data = Geometry.Parse("M 3,0 Q 3.4,2.6 6,3 Q 3.4,3.4 3,6 Q 2.6,3.4 0,3 Q 2.6,2.6 3,0 Z"),
+            Fill = Brushes.White, Width = 6, Height = 6, Stretch = Stretch.Fill, Opacity = 0,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 3, -4, 0), RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = _sparkleScale,
+        };
+        face.Children.Add(_sparkle);
 
         // cheeks that blush when you hover
         _blushL = Blush(-1);
@@ -76,6 +95,50 @@ public sealed class NotchEyes : Grid
         MouseLeftButtonDown += OnClick;
     }
 
+    private readonly Path _browL, _browR, _sparkle;
+    private readonly RotateTransform _browLRot, _browRRot;
+    private readonly TranslateTransform _browLY, _browRY;
+    private readonly ScaleTransform _sparkleScale = new(0.2, 0.2);
+    private DateTime _nextSparkle = DateTime.Now.AddSeconds(5);
+
+    private static Path Brow(bool isLeft, out RotateTransform rot, out TranslateTransform y)
+    {
+        rot = new RotateTransform();
+        y = new TranslateTransform();
+        return new Path
+        {
+            Data = Geometry.Parse("M 0,2.6 Q 4.6,-0.4 9.4,2.2"),
+            Stroke = new SolidColorBrush(Color.FromArgb(0xE6, 0xF2, 0xF4, 0xF8)), StrokeThickness = 1.7,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            Width = D, Height = 4, Stretch = Stretch.None, Margin = new Thickness(1.5, 0, 0, 0),
+            RenderTransformOrigin = new Point(isLeft ? 0.7 : 0.3, 0.5),
+            RenderTransform = new TransformGroup { Children = { new ScaleTransform(isLeft ? 1 : -1, 1), rot, y } },
+            Opacity = 0.9,
+        };
+    }
+
+    /// <summary>Eyebrow pose per mood: (lift px, inner-end tilt °, opacity).</summary>
+    private void PoseBrows(EyeMood mood, int ms)
+    {
+        var (lift, tilt, op) = mood switch
+        {
+            EyeMood.Surprised => (-2.6, 0.0, 1.0),
+            EyeMood.Happy => (-1.2, -6.0, 1.0),
+            EyeMood.Love => (-1.6, -8.0, 1.0),
+            EyeMood.Sad => (-0.6, -18.0, 0.95),
+            EyeMood.Angry => (1.2, 20.0, 1.0),
+            EyeMood.Sleepy => (1.4, 4.0, 0.55),
+            _ => (_hover ? -1.3 : 0.0, 0.0, 0.9),
+        };
+        Motion.To(_browLY, TranslateTransform.YProperty, lift, ms, Motion.Spring(0.4));
+        Motion.To(_browRY, TranslateTransform.YProperty, lift, ms, Motion.Spring(0.4));
+        // positive tilt pulls the inner ends down (angry); negative raises them (sad / soft)
+        Motion.To(_browLRot, RotateTransform.AngleProperty, tilt, ms, Motion.Spring(0.4));
+        Motion.To(_browRRot, RotateTransform.AngleProperty, -tilt, ms, Motion.Spring(0.4));
+        Motion.To(_browL, OpacityProperty, op, ms);
+        Motion.To(_browR, OpacityProperty, op, ms);
+    }
+
     private static Ellipse Blush(int side) => new()
     {
         Width = 7, Height = 3.4, Opacity = 0, IsHitTestVisible = false,
@@ -89,6 +152,9 @@ public sealed class NotchEyes : Grid
 
     /// <summary>Raised when the user pokes / winks at the eyes (so the host can e.g. avoid expanding).</summary>
     public event Action? Interacted;
+
+    /// <summary>What just happened to the eyes: "hover", "poke", "angry", "wink" — the notch answers with a speech bubble.</summary>
+    public event Action<string>? Reaction;
 
     /// <summary>Iris colour (follows the artwork accent).</summary>
     public void SetIris(Color c, int ms = 600)
@@ -110,6 +176,23 @@ public sealed class NotchEyes : Grid
         }
         if (_hover && now - _hoverSince > TimeSpan.FromSeconds(1.3) && _mood == EyeMood.Neutral)
             Express(EyeMood.Happy, 1500);
+
+        if (now >= _nextSparkle)
+        {
+            _nextSparkle = now.AddSeconds(_rng.Next(6, 14));
+            if (_mood is not (EyeMood.Sleepy or EyeMood.Sad or EyeMood.Angry))
+            {
+                var tw = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(700) };
+                tw.KeyFrames.Add(new EasingDoubleKeyFrame(1.1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(260)), new BackEase { EasingMode = EasingMode.EaseOut }));
+                tw.KeyFrames.Add(new EasingDoubleKeyFrame(0.2, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(700))));
+                _sparkleScale.BeginAnimation(ScaleTransform.ScaleXProperty, tw);
+                _sparkleScale.BeginAnimation(ScaleTransform.ScaleYProperty, tw);
+                var op = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(700) };
+                op.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(200))));
+                op.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(700))));
+                _sparkle.BeginAnimation(OpacityProperty, op);
+            }
+        }
 
         if (now >= _nextGlance && now >= _attentionUntil && !_hover)
         {
@@ -161,6 +244,7 @@ public sealed class NotchEyes : Grid
         _mood = mood;
         _left.Apply(mood, ms);
         _right.Apply(mood, ms);
+        PoseBrows(mood, ms + 80);
     }
 
     /// <summary>Little hop (notification, plug-in…).</summary>
@@ -206,6 +290,8 @@ public sealed class NotchEyes : Grid
         Motion.To(_blushL, OpacityProperty, on ? 1 : 0, 350);
         Motion.To(_blushR, OpacityProperty, on ? 1 : 0, 350);
         if (!on && _mood == EyeMood.Happy) Express(EyeMood.Neutral, 10);
+        PoseBrows(_mood, 260);   // brows lift a little when you look at them
+        if (on) Reaction?.Invoke("hover");
     }
 
     private void OnClick(object sender, MouseButtonEventArgs e)
@@ -227,9 +313,10 @@ public sealed class NotchEyes : Grid
         _shake.BeginAnimation(TranslateTransform.XProperty, wiggle);
         Motion.Pop(_pop, 0.82, 1, 480, 0.6);
 
-        if (_pokes.Count >= 4) { Express(EyeMood.Angry, 2200); _pokes.Clear(); }
+        if (_pokes.Count >= 4) { Express(EyeMood.Angry, 2200); _pokes.Clear(); Reaction?.Invoke("angry"); }
         else
         {
+            Reaction?.Invoke("poke");
             var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(330) };
             t.Tick += (_, _) => { t.Stop(); Express(EyeMood.Surprised, 650); };
             t.Start();
@@ -241,6 +328,7 @@ public sealed class NotchEyes : Grid
         _right.WinkClose();
         Express(EyeMood.Love, 1300);
         Motion.Pop(_pop, 0.9, 1, 420, 0.5);
+        Reaction?.Invoke("wink");
     }
 
     // ------------------------------------------------------------------ one eyeball

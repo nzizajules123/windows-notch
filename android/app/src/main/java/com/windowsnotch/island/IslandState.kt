@@ -49,7 +49,7 @@ class ChatThread(val key: String, val app: String, val pkg: String, val title: S
 }
 
 sealed interface IslandEvent {
-    data class Notification(val app: String, val title: String, val text: String, val icon: ImageBitmap?, val chat: ChatThread? = null) : IslandEvent
+    data class Notification(val app: String, val title: String, val text: String, val icon: ImageBitmap?, val chat: ChatThread? = null, val pkg: String = "") : IslandEvent
     data class Charge(val charging: Boolean, val percent: Int) : IslandEvent
     data class Volume(val level: Float, val muted: Boolean) : IslandEvent
 }
@@ -101,6 +101,32 @@ object Island {
     fun post(e: IslandEvent) {
         event = e
         eventId++
+    }
+
+    /** What the eyes are saying right now (speech bubble), and a counter so repeats still pop. */
+    var speech by mutableStateOf<String?>(null)
+        private set
+    var speechId by mutableLongStateOf(0L)
+        private set
+    var talk by mutableStateOf(true)
+
+    fun say(text: String) {
+        if (!talk) return
+        speech = text
+        speechId++
+    }
+
+    fun pick(vararg s: String) = s.random()
+
+    fun greeting(): String {
+        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return when {
+            h < 5 -> pick("Up late? 🌙", "Night owl mode 🦉")
+            h < 12 -> pick("Good morning ☀️", "Rise and shine ☀️")
+            h < 17 -> pick("Good afternoon 🌤", "Hey! Good afternoon 👋")
+            h < 22 -> pick("Good evening 🌆", "Evening! 👋")
+            else -> pick("Late one tonight? 🌙", "Good night soon? 🌙")
+        }
     }
 
     fun react(m: EyeMood, ms: Long = 1600) {

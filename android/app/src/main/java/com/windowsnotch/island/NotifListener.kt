@@ -173,7 +173,7 @@ class NotifListener : NotificationListenerService() {
 
         main.post {
             val chat = if (isChat) upsertChat(sbn.packageName, app, title, text, style, replyAction, icon, avatar) else null
-            Island.post(IslandEvent.Notification(chat?.app ?: app, chat?.title ?: title, text.replace('\n', ' '), icon, chat))
+            Island.post(IslandEvent.Notification(chat?.app ?: app, chat?.title ?: title, text.replace('\n', ' '), icon, chat, sbn.packageName))
         }
     }
 

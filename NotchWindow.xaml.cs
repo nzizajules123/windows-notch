@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -51,6 +51,7 @@ public partial class NotchWindow : Window
     private string? _activityLine;
     private ActivityItem? _live;
     private bool _liveShown;
+    private bool? _lastLowWarn;
     private const double CollapsedWLive = 312;
     private static readonly System.Net.Http.HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
     private bool _typing;
@@ -120,6 +121,10 @@ public partial class NotchWindow : Window
         EarR.Fill = _glass;
         _theme.Changed += (c, ms) => Eyes.SetIris(c, ms);
         Eyes.Interacted += () => _hoverIntent.Stop();
+        Eyes.Reaction += OnEyesReaction;
+        _bubbleTimer.Tick += (_, _) => HideBubble();
+        _notifTick.Tick += (_, _) => OnNotifTick();
+        TalkSwitch.IsChecked = _settings.EyesTalk;
 
         _kSung.Color = AccentTheme.Lighter(AccentTheme.Default, 0.35);
         _karaoke = new LinearGradientBrush(new GradientStopCollection
@@ -159,6 +164,8 @@ public partial class NotchWindow : Window
             if (!Notch.IsMouseOver) return;
             // hovering / poking the eyes plays with them instead of opening the notch
             if (Eyes.IsMouseOver && _mode == Mode.Collapsed) { _hoverIntent.Start(); return; }
+            // a notification card stays put while you hover it (so its buttons can be clicked); click it to open
+            if (_mode == Mode.Peek && _card == NotifView) return;
             Expand();
         };
         _peekTimer.Tick += (_, _) => { _peekTimer.Stop(); EndPeek(); };
@@ -352,6 +359,7 @@ public partial class NotchWindow : Window
         wake.Tick += (_, _) =>
         {
             wake.Stop();
+            SayLater(Greeting(), 700, 3000);
             Eyes.Jump(1.2);
             Eyes.Blink(twice: true);
             ApplyCollapsed(animate: true);
@@ -406,6 +414,7 @@ public partial class NotchWindow : Window
         try
         {
             await Task.Delay(1500); Save("1-collapsed");
+            Say("Hello there! 👋", 60000); await Task.Delay(900); Save("1k-bubble"); HideBubble(); await Task.Delay(300);
             Eyes.Express(EyeMood.Happy, 60000);
             await Task.Delay(700); Save("1b-eyes-happy");
             Eyes.Express(EyeMood.Neutral, 10);
@@ -416,7 +425,7 @@ public partial class NotchWindow : Window
             await Task.Delay(900); Save("1d-hud-wifi");
             HideHud(); Eyes.Express(EyeMood.Neutral, 10);
             await Task.Delay(800);
-            ShowPeek("Ana", "See you at 7? 🍕", AppIconFor("explorer"), "", media: false, ms: 60000, app: "WhatsApp  ·  now");
+            var anaChat = _chats.Add("WhatsApp", new ToastInfo { Title = "Ana", Body = "Are you coming tonight? We're at the usual place 🍕" }, null); ShowNotif(new NotifData("WhatsApp", "Ana", "Are you coming tonight? We're at the usual place 🍕", null, "\uE8BD", anaChat, Color.FromRgb(0x25, 0xD3, 0x66))); ShowNotif(new NotifData("Mail", "Weekly report", "Your summary is ready", null, "\uE715", null));
             await Task.Delay(1200); Save("1e-notification");
             ShowCharge(true, 79);
             await Task.Delay(1500); Save("1f-charging");
@@ -602,10 +611,10 @@ public partial class NotchWindow : Window
         var head = string.IsNullOrWhiteSpace(title) ? app : title;
         var sub = string.IsNullOrWhiteSpace(body) || body == head ? "" : body;
         var icon = AppIconFor(app);
-        var appLine = string.IsNullOrWhiteSpace(app) ? "Notification  ·  now" : $"{app}  ·  now{(isChat ? "  ·  hover to reply" : "")}";
-        // let the eyes react first, then open the bubble
-        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(520) };
-        t.Tick += (_, _) => { t.Stop(); ShowPeek(head, sub, icon, "\uEA8F", media: false, ms: 5200, app: appLine); };
+        var chat = isChat ? _pendingChat : null;
+        // let the eyes react first, then open the card
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(480) };
+        t.Tick += (_, _) => { t.Stop(); ShowNotif(new NotifData(string.IsNullOrWhiteSpace(app) ? "Notification" : app, head, sub, icon, "\uEA8F", chat)); };
         t.Start();
     }
 
@@ -820,10 +829,228 @@ public partial class NotchWindow : Window
         if (prev == ActivityState.Working && item.State == ActivityState.Done && App.SnapshotDir == null)
         {
             Eyes.Express(EyeMood.Happy, 1400);
-            ShowPeek($"{item.App} finished", item.Detail.Length > 0 ? item.Detail : item.Title, item.Icon, "", media: false, ms: 5000,
-                app: item.Title is { Length: > 0 } t2 ? $"{item.App}  ·  {t2}" : item.App);
+            ShowNotif(new NotifData($"{item.App} finished", item.Title is { Length: > 0 } t2 && t2 != "Open" ? t2 : "All done", item.Detail, item.Icon, "\uE945", null, item.Brand));
+            SayLater("Done! ✅", 6500, 2000);
         }
         if (_mode == Mode.Collapsed) ApplyCollapsed(animate: true);
+    }
+
+    // =======================================================================
+    //  The eyes talk: speech bubble with greetings, reactions and gentle nudges
+    // =======================================================================
+    private readonly DispatcherTimer _bubbleTimer = new();
+    private DateTime _lastHello = DateTime.MinValue, _lastSay = DateTime.MinValue, _nextChatter = DateTime.Now.AddMinutes(9);
+    private static readonly Random Rng = new();
+    private static string Pick(params string[] s) => s[Rng.Next(s.Length)];
+
+    private static string Greeting()
+    {
+        var h = DateTime.Now.Hour;
+        return h switch
+        {
+            < 5 => Pick("Up late? 🌙", "Night owl mode 🦉"),
+            < 12 => Pick("Good morning ☀️", "Morning! Ready to build? ☀️", "Rise and shine ☀️"),
+            < 17 => Pick("Good afternoon 🌤", "Hey! Good afternoon 👋"),
+            < 22 => Pick("Good evening 🌆", "Evening! 👋"),
+            _ => Pick("Late one tonight? 🌙", "Good night soon? 🌙"),
+        };
+    }
+
+    /// <summary>Shows a little speech bubble under the pill; the eyes glance down at it.</summary>
+    private void Say(string text, int ms = 2600)
+    {
+        if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro) return;
+        BubbleText.Text = text;
+        Bubble.Margin = new Thickness(0, Notch.ActualHeight + 3, 0, 0);
+        Bubble.Visibility = Visibility.Visible;
+        Bubble.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)));
+        Motion.Pop(BubbleScale, 0.45, 1, 520, 0.55);
+        BubbleY.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-8, 0, TimeSpan.FromMilliseconds(420)) { EasingFunction = Motion.Spring(0.5) });
+        Eyes.Attend(0, 2.2, Math.Min(ms, 1400));
+        _lastSay = DateTime.Now;
+        _bubbleTimer.Interval = TimeSpan.FromMilliseconds(ms);
+        _bubbleTimer.Stop();
+        _bubbleTimer.Start();
+    }
+
+    /// <summary>Says something once the island is back to its small self (e.g. after a pop-up card).</summary>
+    private void SayLater(string text, int delayMs, int ms = 2600)
+    {
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delayMs) };
+        t.Tick += (_, _) => { t.Stop(); Say(text, ms); };
+        t.Start();
+    }
+
+    private void HideBubble()
+    {
+        _bubbleTimer.Stop();
+        if (Bubble.Visibility != Visibility.Visible) return;
+        Motion.Scale(BubbleScale, 0.85, 200);
+        Motion.To(Bubble, OpacityProperty, 0, 170, done: () => { if (Bubble.Opacity < 0.05) Bubble.Visibility = Visibility.Collapsed; });
+    }
+
+    private void OnEyesReaction(string what)
+    {
+        switch (what)
+        {
+            case "hover":
+                if (DateTime.Now - _lastHello < TimeSpan.FromSeconds(25)) return;
+                _lastHello = DateTime.Now;
+                Say(Rng.Next(4) == 0 ? Greeting() : Pick("Hi! 👋", "Hello there! 👋", "Hey you 😊", "Oh, hi!", "Yes? 👀", "Hiya! ✨", "Hello, friend 🙂"));
+                break;
+            case "poke":
+                Say(Pick("Ouch!", "Boop! 👉", "Hey! 😳", "That tickles 😆", "Hehe", "Careful! 👀", "Again? 🙃"), 1600);
+                break;
+            case "angry":
+                Say(Pick("Stop it! 😤", "Hey, not cool 😠", "Okay, OKAY! 😤"), 2200);
+                break;
+            case "wink":
+                Say(Pick("Hehe 😉", "Love you too ❤️", "😉✨", "You're the best 💖"), 1900);
+                break;
+        }
+    }
+
+    /// <summary>Every few minutes, when it's calm, a friendly nudge.</summary>
+    private void MaybeChatter()
+    {
+        if (!_settings.EyesTalk || _mode != Mode.Collapsed || DateTime.Now < _nextChatter || DateTime.Now - _lastSay < TimeSpan.FromMinutes(3)) return;
+        _nextChatter = DateTime.Now.AddMinutes(Rng.Next(9, 17));
+        if (_live != null && DateTime.Now - _live.StartedAt > TimeSpan.FromMinutes(40)) { Say($"{_live.App} has been busy a while ⏳", 3200); return; }
+        if (_media.Current?.IsPlaying == true) { Say(Pick("Great vibes 🎶", "This one slaps 🎧", "Dancing over here 💃"), 3000); return; }
+        Say(Pick("Stay hydrated 💧", "You got this 💪", "Time to stretch? 🧘", "Deep breath… 😌", "Nice focus 🔥", "Blink a little 👀", "Proud of you ✨"), 3200);
+    }
+
+    private void TalkSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.EyesTalk = TalkSwitch.IsChecked == true;
+        _settings.Save();
+        if (!_settings.EyesTalk) HideBubble();
+    }
+
+    // =======================================================================
+    //  Notification card: tinted icon, two-line message, actions, countdown, queue
+    // =======================================================================
+    private sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null);
+    private readonly List<NotifData> _notifQueue = new();
+    private NotifData? _notif;
+    private double _notifTotal, _notifLeft;
+    private readonly DispatcherTimer _notifTick = new() { Interval = TimeSpan.FromMilliseconds(40) };
+
+    private void ShowNotif(NotifData d)
+    {
+        if (Expanded || _countdown > 0 || _intro) return;
+        if (_mode == Mode.Peek && _card == NotifView && _notif != null)
+        {
+            _notifQueue.Add(d);
+            UpdateNotifMore();
+            Motion.SlideIn(NotifMore, 4, 300);
+            return;
+        }
+        PresentNotif(d);
+    }
+
+    private void PresentNotif(NotifData d)
+    {
+        var same = _mode == Mode.Peek && _card == NotifView;
+        _notif = d;
+        HideBubble();
+        NotifApp.Text = d.App;
+        NotifTitle.Text = d.Title.Length > 0 ? d.Title : d.App;
+        NotifBody.Text = d.Body;
+        NotifBody.Visibility = d.Body.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NotifIcon.Source = d.Icon;
+        NotifGlyph.Text = d.Glyph;
+        NotifGlyph.Visibility = d.Icon == null ? Visibility.Visible : Visibility.Collapsed;
+
+        var tint = d.Tint ?? (d.Icon is System.Windows.Media.Imaging.BitmapSource b ? ColorUtil.Dominant(b) : _theme.Current);
+        NotifApp.Foreground = new SolidColorBrush(AccentTheme.Lighter(tint, 0.25));
+        Motion.Color(NotifGlowStop, GradientStop.ColorProperty, AccentTheme.WithAlpha(tint, 0x50), 300);
+        NotifTimer.Background = new SolidColorBrush(tint);
+        NotifReply.Visibility = d.Chat != null ? Visibility.Visible : Visibility.Collapsed;
+        NotifOpenText.Text = d.App.Length > 0 && d.App.Length <= 14 ? $"Open {d.App}" : "Open";
+        UpdateNotifMore();
+
+        ShowCard(NotifView, 460, 118, 600000);       // our own countdown closes it (and pauses on hover)
+        Motion.Pop(NotifIconScale, 0.35, 1, 640, 0.75);
+        Motion.SlideIn(NotifText, same ? 12 : 8, 380, same ? 0 : 120);
+        Motion.SlideIn(NotifActions, 8, 380, 220);
+        _notifTotal = _notifLeft = d.Chat != null ? 7500 : 5600;
+        _notifTick.Stop();
+        _notifTick.Start();
+    }
+
+    private void OnNotifTick()
+    {
+        if (_mode != Mode.Peek || _card != NotifView) { _notifTick.Stop(); _notif = null; _notifQueue.Clear(); return; }
+        if (!Notch.IsMouseOver) _notifLeft -= _notifTick.Interval.TotalMilliseconds;   // pauses while you hover
+        NotifTimer.Width = Math.Max(0, NotifTimerTrack.ActualWidth * _notifLeft / _notifTotal);
+        if (_notifLeft <= 0) NextNotif();
+    }
+
+    private void NextNotif()
+    {
+        if (_notifQueue.Count > 0)
+        {
+            var next = _notifQueue[0];
+            _notifQueue.RemoveAt(0);
+            PresentNotif(next);
+            return;
+        }
+        _notifTick.Stop();
+        _notif = null;
+        EndPeek();
+    }
+
+    private void UpdateNotifMore()
+    {
+        NotifMore.Visibility = _notifQueue.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NotifMoreText.Text = $"+{_notifQueue.Count} more";
+    }
+
+    private void NotifView_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_notif == null) return;
+        _pendingChat = _notif.Chat;
+        _notifTick.Stop();
+        _notifQueue.Clear();
+        _notif = null;
+        Expand();
+    }
+
+    private void NotifReply_Click(object sender, RoutedEventArgs e) => NotifView_Click(sender, null!);
+
+    private void NotifDismiss_Click(object sender, RoutedEventArgs e)
+    {
+        Motion.SlideIn(NotifText, -6, 160);
+        NextNotif();
+    }
+
+    private void NotifOpen_Click(object sender, RoutedEventArgs e)
+    {
+        var d = _notif;
+        if (d == null) return;
+        if (d.Chat != null) ChatService.OpenApp(d.App);
+        else if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
+        NextNotif();
+    }
+
+    /// <summary>Main window of a running app, matched by process name or description.</summary>
+    private static IntPtr WindowFor(string app)
+    {
+        var key = new string(app.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        foreach (var p in System.Diagnostics.Process.GetProcesses())
+        {
+            try
+            {
+                if (p.MainWindowHandle == IntPtr.Zero) continue;
+                var pn = p.ProcessName.ToLowerInvariant();
+                var desc = new string((p.MainModule?.FileVersionInfo.FileDescription ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+                if (pn == key || desc == key || (key.Length >= 4 && (pn.Contains(key) || desc.Contains(key)))) return p.MainWindowHandle;
+            }
+            catch { }
+            finally { p.Dispose(); }
+        }
+        return IntPtr.Zero;
     }
 
     /// <summary>Picks the job shown live in the pill and refreshes the Activity header / badge.</summary>
@@ -874,7 +1101,12 @@ public partial class NotchWindow : Window
                                   : (new UIElement[] { MiniLeft, MiniRight }, new UIElement[] { LiveLeft, LiveRight });
             foreach (var h in hide) Motion.Hide(h, 140);
             foreach (var s in show) { s.Visibility = Visibility.Visible; s.Opacity = 0; Motion.Show(s, 320, 120, blur: 6, fromY: 4); }
-            if (on) { Eyes.Express(EyeMood.Surprised, 500); Eyes.Attend(-3, 0, 1200); }
+            if (on)
+            {
+                Eyes.Express(EyeMood.Surprised, 500);
+                Eyes.Attend(-3, 0, 1200);
+                if (Rng.Next(2) == 0) SayLater(Pick("On it! 💪", "Ooh, working 🧠", "Let's go 🚀", "Busy busy 🐝"), 700, 2000);
+            }
             return;
         }
         // keep the two layouts from overlapping after the volume / Wi-Fi overlay
@@ -1151,7 +1383,7 @@ public partial class NotchWindow : Window
         if (_tick % 4 == 0) UpdateFullscreenFade();
         if (_tick % 20 == 0) UpdateBattery();
         if (_tick % 8 == 4) _activity.Refresh();
-        if (_tick % 4 == 0) { _activity.Tick(); UpdateLive(); }
+        if (_tick % 4 == 0) { _activity.Tick(); UpdateLive(); MaybeChatter(); }
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -1524,7 +1756,13 @@ public partial class NotchWindow : Window
             Eyes.Express(charging ? EyeMood.Love : EyeMood.Surprised, 1800);
             Eyes.Jump(1.15);
         }
-        if (has && _lastCharging.HasValue && _lastCharging != charging) ShowCharge(charging, pct);
+        if (has && _lastCharging.HasValue && _lastCharging != charging)
+        {
+            ShowCharge(charging, pct);
+            SayLater(charging ? Pick("Yum, power ⚡", "Charging up! 🔋", "Mmm, electricity ⚡") : Pick("Unplugged! I'll be careful 🔋", "Running free 🏃"), 4300, 2400);
+        }
+        if (has && !charging && pct <= 15 && _lastLowWarn != true) { _lastLowWarn = true; SayLater("Battery's low 🥺 plug me in?", 400, 3200); }
+        if (charging || pct > 20) _lastLowWarn = false;
         _lastCharging = has ? charging : null;
     }
 
@@ -1538,6 +1776,8 @@ public partial class NotchWindow : Window
     {
         var m = _media.Current;
         var trackChanged = m?.TrackKey != _lastTrackKey;
+        if (trackChanged && m?.IsPlaying == true && _lastTrackKey != null && _mode == Mode.Collapsed && Rng.Next(3) == 0)
+            SayLater(Pick("Ooh, nice track 🎶", "Bop bop 🎵", "I love this one 🎧", "Turn it up! 🔊"), 3800, 2200);
         if (m?.IsPlaying == true) _lastPlaying = DateTime.Now;
         _theme.Set(m?.Accent ?? AccentTheme.Default);
 
@@ -2253,6 +2493,8 @@ public partial class NotchWindow : Window
         Dispatcher.BeginInvoke(async () =>
         {
             if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); SetHold(null); }
+            if (e.Reason == SessionSwitchReason.SessionUnlock) SayLater(Pick("Welcome back! 👋", "Hey, you're back! 😊", "Missed you 👀"), 1200, 2600);
+            if (e.Reason == SessionSwitchReason.SessionLock) { /* handled above */ }
             else if (e.Reason == SessionSwitchReason.SessionUnlock && _settings.GesturesEnabled)
             {
                 _gCooldown = DateTime.UtcNow.AddSeconds(3); // don't instantly re-lock after unlocking

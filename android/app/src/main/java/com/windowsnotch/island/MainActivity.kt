@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val prefs = getSharedPreferences("island", MODE_PRIVATE)
         Island.lyricsEnabled = prefs.getBoolean("lyrics", true)
+        Island.talk = prefs.getBoolean("talk", true)
         setContent {
             Setup(
                 overlayOn = overlayOn,
@@ -63,6 +64,7 @@ class MainActivity : ComponentActivity() {
                 openAppInfo = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
                 lyrics = Island.lyricsEnabled,
                 setLyrics = { Island.lyricsEnabled = it; prefs.edit().putBoolean("lyrics", it).apply() },
+                setTalk = { prefs.edit().putBoolean("talk", it).apply() },
             )
         }
     }
@@ -87,6 +89,7 @@ private fun Setup(
     overlayOn: Boolean, listenerOn: Boolean,
     openAccessibility: () -> Unit, openListener: () -> Unit, openAppInfo: () -> Unit,
     lyrics: Boolean, setLyrics: (Boolean) -> Unit,
+    setTalk: (Boolean) -> Unit,
 ) {
     var lyricsOn by androidx.compose.runtime.remember { mutableStateOf(lyrics) }
     Column(
@@ -115,6 +118,16 @@ private fun Setup(
                 Text("Karaoke lyrics from LRCLIB while music plays", color = Dim, fontSize = 12.5.sp)
             }
             Switch(lyricsOn, { lyricsOn = it; setLyrics(it) }, colors = SwitchDefaults.colors(checkedTrackColor = Green))
+        }
+        var talkOn by androidx.compose.runtime.remember { mutableStateOf(Island.talk) }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Eyes talk", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Little speech bubbles: hi, hello, reactions and friendly nudges", color = Dim, fontSize = 12.5.sp)
+            }
+            Switch(talkOn, {
+                talkOn = it; Island.talk = it; setTalk(it)
+            }, colors = SwitchDefaults.colors(checkedTrackColor = Green))
         }
         Spacer(Modifier.height(8.dp))
         Text("Tap the island to open it · tap outside to close · the eyes react to notifications, volume and your charger.", color = Faint, fontSize = 12.sp)
