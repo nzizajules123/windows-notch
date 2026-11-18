@@ -88,6 +88,24 @@ Check your camera's picture quality with `python python/camera_probe.py` (lower 
 Grab `WindowsNotch-v*-win-x64.zip` from the [Releases](../../releases) page, unzip it anywhere and run `WindowsNotch.exe`.
 It's self-contained: no .NET install needed.
 
+## Android: Notch Island
+
+The same island for Android phones (Android 8+), in [`android/`](android): a pill around your front camera hole with
+the 3D eyes, the droplet launch intro, now-playing media (artwork, progress, controls, karaoke lyrics from LRCLIB),
+notification pop-ups with the app's icon, and charging / volume animations.
+
+**Install:** download `NotchIsland-v*.apk` from [Releases](../../releases) and open it on your phone (allow installing
+from your browser or file manager when asked). Then open **Notch Island** and:
+
+1. **Turn on the island**: Settings → Accessibility → Notch Island → On. It only draws the island and doesn't read your
+   screen. On Android 13+ a sideloaded app's accessibility switch is greyed out at first. Open *App info → ⋮ →
+   Allow restricted settings* and try again.
+2. **Allow media & notifications**: Notification access → Notch Island → On.
+
+Tap the island to open it, tap outside to close it. Tap the big eyes in the open view to poke them, or double-tap them to wink.
+
+Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` then `gradlew assembleRelease`.
+
 ## Build from source
 
 ```bash

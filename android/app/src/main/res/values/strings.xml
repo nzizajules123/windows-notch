@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Notch Island</string>
+    <string name="a11y_label">Notch Island</string>
+    <string name="listener_label">Notch Island media &amp; notifications</string>
+    <string name="a11y_description">Shows the Notch Island around your front camera: the little eyes, now-playing media with lyrics, notifications, charging and volume animations. It does not read or change what is on your screen.</string>
+</resources>

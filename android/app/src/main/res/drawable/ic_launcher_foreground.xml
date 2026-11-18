@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a black pill with two little eyes -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FF000000" android:strokeColor="#33FFFFFF" android:strokeWidth="1"
+        android:pathData="M30,40 L78,40 A14,14 0 0 1 78,68 L30,68 A14,14 0 0 1 30,40 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M45,54 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M63,54 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+    <path android:fillColor="#FF30D158" android:pathData="M46,54 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0" />
+    <path android:fillColor="#FF30D158" android:pathData="M64,54 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0" />
+    <path android:fillColor="#FF000000" android:pathData="M46,54 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0" />
+    <path android:fillColor="#FF000000" android:pathData="M64,54 m-1.7,0 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0" />
+</vector>

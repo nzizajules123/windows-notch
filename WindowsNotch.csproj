@@ -24,4 +24,11 @@
     <None Update="python\*.py;python\requirements.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- the Android app lives in its own Gradle project -->
+  <ItemGroup>
+    <Compile Remove="android\**" />
+    <None Remove="android\**" />
+    <Page Remove="android\**" />
+  </ItemGroup>
+
 </Project>
