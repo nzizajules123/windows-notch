@@ -185,16 +185,9 @@ public partial class NotchWindow : Window
         UpdateClock();
         ApplyCollapsed(animate: false);
 
-        // Entrance: the island drops in from the top edge.
-        var drop = new TranslateTransform(0, -40);
-        NotchHost.RenderTransform = drop;
-        Motion.To(drop, TranslateTransform.YProperty, 0, 700, Motion.Spring(0.4), 150);
-        // keep the blur region glued to the island while it drops in
-        EventHandler follow = (_, _) => UpdateRegion();
-        CompositionTarget.Rendering += follow;
-        var stopFollow = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) };
-        stopFollow.Tick += (_, _) => { stopFollow.Stop(); CompositionTarget.Rendering -= follow; UpdateRegion(); };
-        stopFollow.Start();
+        // Entrance: a droplet falls, bounces like a ball, then melts into the top edge and spreads into the island.
+        if (App.SnapshotDir == null || App.IntroCapture) PlayIntro();
+        if (App.IntroCapture) { _ = CaptureIntroAsync(App.SnapshotDir!); return; }
 
         _media.Changed += OnMediaChanged;
         try { await _media.InitAsync(); }
@@ -214,6 +207,152 @@ public partial class NotchWindow : Window
 
         _clock.Start();
         OnMediaChanged();
+    }
+
+    // =======================================================================
+    //  Launch intro: droplet → bounce → merge into the top edge → island
+    // =======================================================================
+    private bool _intro;
+
+    private void PlayIntro()
+    {
+        _intro = true;
+        const double D = 20;            // droplet diameter
+        const double Floor = 44;        // where it lands (top of the drop, in px from the screen edge)
+
+        var drop = new Border
+        {
+            Width = D, Height = D, CornerRadius = new CornerRadius(D / 2), Background = Brushes.Black,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
+            IsHitTestVisible = false, RenderTransformOrigin = new Point(0.5, 0.5),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(0.8),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 4, Direction = 270, Opacity = 0.45 },
+        };
+        // glossy highlight so it reads as a liquid drop
+        drop.Child = new Ellipse
+        {
+            Width = 7, Height = 4.5, Fill = new SolidColorBrush(Color.FromArgb(0x70, 0xFF, 0xFF, 0xFF)),
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(4, 3.4, 0, 0), RenderTransform = new RotateTransform(-20),
+        };
+        var squash = new ScaleTransform(1, 1);
+        var move = new TranslateTransform(0, -D - 8);
+        drop.RenderTransform = new TransformGroup { Children = { squash, move } };
+        Root.Children.Add(drop);
+        NotchHost.Opacity = 0;
+
+        static EasingDoubleKeyFrame K(double v, int ms, IEasingFunction? e = null) =>
+            new(v, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms)), e);
+        var easeIn = new QuadraticEase { EasingMode = EasingMode.EaseIn };
+        var easeOut = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+        var suck = new CubicEase { EasingMode = EasingMode.EaseIn };
+
+        // position: fall → bounce → smaller bounce → settle → pulled up into the edge
+        var y = new DoubleAnimationUsingKeyFrames
+        {
+            KeyFrames =
+            {
+                K(-D - 8, 0), K(Floor, 430, easeIn),
+                K(Floor - 26, 650, easeOut), K(Floor, 860, easeIn),
+                K(Floor - 9, 975, easeOut), K(Floor, 1085, easeIn),
+                K(Floor, 1230),
+                K(-2, 1500, suck),
+            },
+        };
+        // squash & stretch: long while falling, flat on impact, tall when sucked up
+        var sx = new DoubleAnimationUsingKeyFrames();
+        var sy = new DoubleAnimationUsingKeyFrames();
+        void S(double x, double yy, int ms, IEasingFunction? e = null) { sx.KeyFrames.Add(K(x, ms, e)); sy.KeyFrames.Add(K(yy, ms, e)); }
+        var springy = new ElasticEase { Oscillations = 1, Springiness = 5, EasingMode = EasingMode.EaseOut };
+        S(0.9, 1.15, 0);
+        S(0.84, 1.22, 400);                       // stretched just before the first impact
+        S(1.42, 0.62, 440);                       // splat
+        S(1, 1, 560, springy);
+        S(0.92, 1.1, 840);
+        S(1.25, 0.78, 868);                       // second, softer splat
+        S(1, 1, 960, springy);
+        S(1.1, 0.9, 1092);                        // tiny tap
+        S(1, 1, 1180, springy);
+        S(1.12, 0.88, 1260);                      // anticipation before being pulled up
+        S(0.74, 1.45, 1500, suck);                // stretched thin as it shoots up
+
+        sx.Completed += (_, _) => MergeIntoIsland(drop);
+        move.BeginAnimation(TranslateTransform.YProperty, y);
+        squash.BeginAnimation(ScaleTransform.ScaleXProperty, sx);
+        squash.BeginAnimation(ScaleTransform.ScaleYProperty, sy);
+    }
+
+    private void MergeIntoIsland(UIElement drop)
+    {
+        Root.Children.Remove(drop);
+        const double D = 20;
+
+        // the island starts as the drop hanging from the edge, then spreads out like liquid
+        foreach (var a in new[] { WidthProperty, HeightProperty }) Notch.BeginAnimation(a, null);
+        BeginAnimation(NotchRadiusProperty, null);
+        Notch.Width = D;
+        Notch.Height = D + 4;
+        NotchRadius = D / 2;
+        NotchHost.BeginAnimation(OpacityProperty, null);
+        NotchHost.Opacity = 1;
+        CollapsedView.Opacity = 0;
+
+        // concave "ears" grow in as it touches the edge
+        foreach (var (ear, origin) in new[] { (EarL, new Point(1, 0)), (EarR, new Point(0, 0)) })
+        {
+            var s = new ScaleTransform(0, 0);
+            ear.RenderTransformOrigin = origin;
+            ear.RenderTransform = s;
+            Motion.Scale(s, 1, 520, 0.5);
+        }
+
+        _intro = false;
+        _targetW = _targetH = -1;
+        var playing = MediaActive;
+        var w = playing ? CollapsedWMedia : CollapsedW;
+        // wobbly spread: width overshoots and settles, height follows a beat later
+        Notch.BeginAnimation(WidthProperty, new DoubleAnimation(D, w, TimeSpan.FromMilliseconds(900))
+        { EasingFunction = new ElasticEase { Oscillations = 1, Springiness = 9, EasingMode = EasingMode.EaseOut } });
+        Notch.BeginAnimation(HeightProperty, new DoubleAnimation(D + 4, CollapsedH, TimeSpan.FromMilliseconds(520))
+        { BeginTime = TimeSpan.FromMilliseconds(60), EasingFunction = Motion.Spring(0.6) });
+        Motion.To(this, NotchRadiusProperty, CollapsedRadius, 500, Motion.Out);
+        _targetW = w;
+        _targetH = CollapsedH;
+
+        // content fades in once it has spread, and the eyes wake up
+        Motion.Show(CollapsedView, 420, 360, blur: 10);
+        var wake = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(620) };
+        wake.Tick += (_, _) =>
+        {
+            wake.Stop();
+            Eyes.Jump(1.2);
+            Eyes.Blink(twice: true);
+            ApplyCollapsed(animate: true);
+        };
+        wake.Start();
+    }
+
+    /// <summary>QA: saves the top of the window every 60 ms while the intro plays, then exits.</summary>
+    private async Task CaptureIntroAsync(string dir)
+    {
+        System.IO.Directory.CreateDirectory(dir);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        for (int i = 0; i < 42; i++)
+        {
+            UpdateLayout();
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap((int)(ActualWidth * dpi.DpiScaleX), (int)(110 * dpi.DpiScaleY),
+                dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+            var dv = new DrawingVisual();
+            using (var dc = dv.RenderOpen())
+                dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0xE9, 0xEB, 0xEF)), null, new Rect(0, 0, ActualWidth, 110));
+            rtb.Render(dv);
+            rtb.Render(Root);
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+            using (var fs = System.IO.File.Create(System.IO.Path.Combine(dir, $"intro-{i:00}.png"))) enc.Save(fs);
+            await Task.Delay(60);
+        }
+        Application.Current.Shutdown();
     }
 
     /// <summary>Design QA: renders collapsed / peek / every tab / countdown to PNGs, then exits.</summary>
@@ -553,7 +692,7 @@ public partial class NotchWindow : Window
     /// <summary>Volume / brightness / network: icon + label on the left, bar + value on the right, eyes in the middle.</summary>
     private void ShowHud(string glyph, string label, double? value, string valueText, int ms = 1600)
     {
-        if (_mode != Mode.Collapsed) return;
+        if (_mode != Mode.Collapsed || _intro) return;
         HudIcon.Text = glyph;
         HudLabel.Text = label;
         HudValue.Text = valueText;
@@ -773,7 +912,7 @@ public partial class NotchWindow : Window
 
     private void Expand()
     {
-        if (Expanded) return;
+        if (Expanded || _intro) return;
         var wasPeek = _mode == Mode.Peek;
         _mode = Mode.Expanded;
         _peekTimer.Stop();
@@ -847,7 +986,7 @@ public partial class NotchWindow : Window
     /// <summary>Opens the island as a pop-up card (notification, track, power, device) for <paramref name="ms"/>.</summary>
     private bool ShowCard(UIElement view, double w, double h, int ms)
     {
-        if (Expanded || _countdown > 0) return false;
+        if (Expanded || _countdown > 0 || _intro) return false;
         if (_hudShown) { _hudTimer.Stop(); _hudShown = false; HudLeft.Visibility = HudRight.Visibility = Visibility.Collapsed; MiniLeft.Visibility = MiniRight.Visibility = Visibility.Visible; MiniLeft.Opacity = MiniRight.Opacity = 1; }
         if (_mode != Mode.Peek)
         {
@@ -898,7 +1037,7 @@ public partial class NotchWindow : Window
 
     private void ApplyCollapsed(bool animate)
     {
-        if (_mode != Mode.Collapsed) return;
+        if (_mode != Mode.Collapsed || _intro) return;
         var ticker = TickerContent();
         var showTicker = ticker != null;
 
@@ -940,7 +1079,7 @@ public partial class NotchWindow : Window
     /// <summary>Fades the island out over fullscreen video; still opens on hover.</summary>
     private void UpdateFullscreenFade()
     {
-        if (!_settings.HideInFullscreen || _mode != Mode.Collapsed || App.SnapshotDir != null) return;
+        if (!_settings.HideInFullscreen || _mode != Mode.Collapsed || App.SnapshotDir != null || _intro) return;
         var fg = Native.GetForegroundWindow();
         var full = false;
         if (fg != IntPtr.Zero && fg != _hwnd && Native.GetWindowRect(fg, out var r))

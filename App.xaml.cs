@@ -20,8 +20,20 @@ public partial class App : Application
     /// <summary>Set by "--snapshot &lt;folder&gt;": render each notch state to PNG and exit (design QA).</summary>
     public static string? SnapshotDir { get; private set; }
 
+    /// <summary>Set by "--intro-capture &lt;folder&gt;": save frames of the launch intro.</summary>
+    public static bool IntroCapture { get; private set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (e.Args.Length >= 2 && e.Args[0] == "--intro-capture")
+        {
+            // QA: record the launch intro frame by frame
+            SnapshotDir = e.Args[1];
+            IntroCapture = true;
+            base.OnStartup(e);
+            new NotchWindow().Show();
+            return;
+        }
         if (e.Args.Length >= 2 && e.Args[0] == "--snapshot")
         {
             SnapshotDir = e.Args[1];
