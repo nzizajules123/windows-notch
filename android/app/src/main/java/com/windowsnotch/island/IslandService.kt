@@ -133,6 +133,8 @@ class IslandService : AccessibilityService() {
             }
         }.apply {
             addView(compose)
+            // the island's own YouTube player: a tiny, invisible web view living in this window
+            addView(NotchPlayer.createView(this@IslandService).apply { alpha = 0.01f }, android.widget.FrameLayout.LayoutParams(2, 2))
             setViewTreeLifecycleOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
             setOnTouchListener { _, ev ->

@@ -42,6 +42,32 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Length >= 2 && e.Args[0] == "--player-test")
+        {
+            // QA: search, play the first result silently in the hidden player, log progress, exit
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var player = new Services.YouTubePlayer { MutedForTest = true };
+            var started = DateTime.Now;
+            player.Changed += () =>
+            {
+                var i = player.Info;
+                if (i != null) Log($"player-test: {i.Title} | playing={i.IsPlaying} pos={i.Position.TotalSeconds:0.0}s dur={i.Duration.TotalSeconds:0}s art={(i.Thumbnail != null)}");
+            };
+            Dispatcher.BeginInvoke(async () =>
+            {
+                try
+                {
+                    var results = await Services.YouTubeSearch.SearchAsync(e.Args[1]);
+                    Log($"player-test: {results.Count} results; first = {results.FirstOrDefault()?.Title}");
+                    if (results.Count > 0) await player.PlayAsync(results, 0);
+                }
+                catch (Exception ex) { Log("player-test: " + ex); }
+            });
+            var stop = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(22) };
+            stop.Tick += (_, _) => { var i = player.Info; Log($"player-test: end playing={i?.IsPlaying} pos={i?.Position.TotalSeconds:0.0}s"); player.Dispose(); Shutdown(); };
+            stop.Start();
+            return;
+        }
         if (e.Args.Length >= 1 && e.Args[0] == "--reply-test")
         {
             // QA: wait for a chat toast, reply through it, log the result, exit

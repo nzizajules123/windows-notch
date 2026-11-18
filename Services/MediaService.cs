@@ -55,6 +55,19 @@ public sealed class MediaService
     public IReadOnlyList<string> SessionApps { get; private set; } = Array.Empty<string>();
     public event Action? Changed;
 
+    /// <summary>The notch's own YouTube player; shown instead of Windows' sessions while it's loaded.</summary>
+    public IExternalPlayer? External
+    {
+        get => _external;
+        set
+        {
+            _external = value;
+            if (value != null) value.Changed += () => _ = PollAsync();
+        }
+    }
+    private IExternalPlayer? _external;
+    private bool ExternalActive => Current?.AppId == YouTubePlayer.AppId && _external?.Info != null;
+
     public async Task InitAsync()
     {
         _mgr = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
@@ -92,6 +105,16 @@ public sealed class MediaService
         try
         {
             var s = Pick();
+            // the in-notch player wins while it's playing, or while nothing else is playing
+            if (_external?.Info is { } ext &&
+                (ext.IsPlaying || s == null || s.GetPlaybackInfo()?.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing))
+            {
+                var extChanged = Current == null || Current.TrackKey != ext.TrackKey || Current.IsPlaying != ext.IsPlaying
+                                 || Current.Thumbnail != ext.Thumbnail || Math.Abs((Current.LivePosition - ext.LivePosition).TotalSeconds) > 1.5;
+                Current = ext;
+                if (extChanged) Changed?.Invoke();
+                return;
+            }
             if (s == null)
             {
                 if (Current != null) { Current = null; Changed?.Invoke(); }
@@ -183,6 +206,8 @@ public sealed class MediaService
 
     public void CycleSource()
     {
+        // source chip on the notch player = stop it and go back to the system's media
+        if (ExternalActive) { _external!.Stop(); _ = PollAsync(); return; }
         var apps = SessionApps;
         if (apps.Count < 2 || Current == null) return;
         var i = apps.ToList().IndexOf(Current.AppId);
@@ -190,12 +215,13 @@ public sealed class MediaService
         _ = PollAsync();
     }
 
-    public async Task PlayPauseAsync() { if (CurrentSession is { } s) await s.TryTogglePlayPauseAsync(); await Task.Delay(150); await PollAsync(); }
-    public async Task NextAsync() { if (CurrentSession is { } s) await s.TrySkipNextAsync(); await Task.Delay(300); await PollAsync(); }
-    public async Task PreviousAsync() { if (CurrentSession is { } s) await s.TrySkipPreviousAsync(); await Task.Delay(300); await PollAsync(); }
+    public async Task PlayPauseAsync() { if (ExternalActive) { await _external!.PlayPauseAsync(); return; } if (CurrentSession is { } s) await s.TryTogglePlayPauseAsync(); await Task.Delay(150); await PollAsync(); }
+    public async Task NextAsync() { if (ExternalActive) { await _external!.NextAsync(); return; } if (CurrentSession is { } s) await s.TrySkipNextAsync(); await Task.Delay(300); await PollAsync(); }
+    public async Task PreviousAsync() { if (ExternalActive) { await _external!.PreviousAsync(); return; } if (CurrentSession is { } s) await s.TrySkipPreviousAsync(); await Task.Delay(300); await PollAsync(); }
 
     public async Task SeekAsync(TimeSpan to)
     {
+        if (ExternalActive) { await _external!.SeekAsync(to); return; }
         if (CurrentSession is { } s) await s.TryChangePlaybackPositionAsync(to.Ticks);
         await Task.Delay(200);
         await PollAsync();

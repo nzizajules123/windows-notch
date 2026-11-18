@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Notch player</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}</style></head>
+<body>
+<!-- Lives in a hidden window: plays YouTube audio for the notch with the official embedded player. -->
+<div id="p"></div>
+<script>
+const post = (m) => window.chrome?.webview?.postMessage(m);
+let player = null, ready = false, pending = null;
+
+const tag = document.createElement("script");
+tag.src = "https://www.youtube.com/iframe_api";
+tag.onerror = () => post({ type: "error", code: -1 });
+document.head.appendChild(tag);
+
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player("p", {
+    width: 320, height: 180,
+    playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0, origin: location.origin },
+    events: {
+      onReady: () => { ready = true; post({ type: "ready" }); if (pending) { load(pending.id, pending.start); pending = null; } },
+      onStateChange: (e) => post({ type: "state", state: e.data }),
+      onError: (e) => post({ type: "error", code: e.data }),
+    },
+  });
+};
+
+function load(id, start) {
+  if (!ready) { pending = { id, start }; return; }
+  player.loadVideoById({ videoId: id, startSeconds: start || 0 });
+}
+
+setInterval(() => {
+  if (!ready || !player.getCurrentTime) return;
+  const d = player.getVideoData ? player.getVideoData() : {};
+  post({ type: "time", t: player.getCurrentTime() || 0, d: player.getDuration() || 0, s: player.getPlayerState(), title: d.title || "", author: d.author || "" });
+}, 500);
+
+window.chrome?.webview?.addEventListener("message", (e) => {
+  const m = e.data || {};
+  if (!ready && m.cmd !== "load") return;
+  switch (m.cmd) {
+    case "load": load(m.id, m.start); break;
+    case "play": player.playVideo(); break;
+    case "pause": player.pauseVideo(); break;
+    case "seek": player.seekTo(m.t, true); break;
+    case "stop": player.stopVideo(); break;
+    case "volume": player.setVolume(m.v); break;
+    case "mute": m.on ? player.mute() : player.unMute(); break;
+  }
+});
+</script>
+</body>
+</html>

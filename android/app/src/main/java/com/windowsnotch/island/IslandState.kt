@@ -56,7 +56,17 @@ sealed interface IslandEvent {
 
 /** Shared, observable state between the services and the island UI (all on the main thread). */
 object Island {
-    var media by mutableStateOf<MediaInfo?>(null)
+    /** What the phone's media sessions say is playing. */
+    var sysMedia by mutableStateOf<MediaInfo?>(null)
+    /** The island's own YouTube player. */
+    var playerMedia by mutableStateOf<MediaInfo?>(null)
+    /** Shown in the island: the island player while it plays (or nothing else does), else the phone's media. */
+    val media: MediaInfo?
+        get() {
+            val p = playerMedia
+            val s = sysMedia
+            return if (p != null && (p.playing || s?.playing != true)) p else s
+        }
     var lyrics by mutableStateOf<LyricsResult?>(null)
     var battery by mutableIntStateOf(100)
     var charging by mutableStateOf(false)

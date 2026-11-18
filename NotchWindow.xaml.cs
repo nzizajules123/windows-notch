@@ -43,8 +43,12 @@ public partial class NotchWindow : Window
     // chats + music search
     private readonly ChatService _chats = new();
     private ChatThread? _openThread, _pendingChat;
-    private readonly System.Collections.ObjectModel.ObservableCollection<string> _suggestions = new();
-    private readonly DispatcherTimer _suggestTimer = new() { Interval = TimeSpan.FromMilliseconds(220) };
+    private readonly System.Collections.ObjectModel.ObservableCollection<YtResult> _results = new();
+    private readonly DispatcherTimer _searchTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
+    private string _resultsFor = "";
+    private readonly YouTubePlayer _player = new();
+    private readonly ActivityService _activity = new();
+    private string? _activityLine;
     private static readonly System.Net.Http.HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
     private bool _typing;
     private readonly DeviceWatcher _devices = new();
@@ -139,8 +143,12 @@ public partial class NotchWindow : Window
             if (!Notch.IsMouseOver) Collapse();
         };
         ChatsList.ItemsSource = _chats.Threads;
-        SuggestionList.ItemsSource = _suggestions;
-        _suggestTimer.Tick += async (_, _) => { _suggestTimer.Stop(); await LoadSuggestionsAsync(SearchBox.Text); };
+        ResultsList.ItemsSource = _results;
+        _searchTimer.Tick += async (_, _) => { _searchTimer.Stop(); await SearchAsync(SearchBox.Text); };
+        _media.External = _player;
+        ActivityList.ItemsSource = _activity.Items;
+        _activity.StateChanged += OnActivityChanged;
+        _activity.Items.CollectionChanged += (_, _) => ActivityEmpty.Visibility = _activity.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         Deactivated += (_, _) => { StopTyping(); if (Expanded && !Notch.IsMouseOver) RestartCollapseTimer(); };
         _hoverIntent.Tick += (_, _) =>
         {
@@ -443,8 +451,11 @@ public partial class NotchWindow : Window
             await Task.Delay(900); Save("11-chat-reply");
             TabSearch.IsChecked = true;
             SearchBox.Text = "indila";
-            await LoadSuggestionsAsync("indila");
-            await Task.Delay(900); Save("12-search");
+            await SearchAsync("indila");
+            await Task.Delay(2500); Save("12-search");
+            _activity.Refresh();
+            TabActivity.IsChecked = true;
+            await Task.Delay(1200); Save("13-activity");
             StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", () => { });
             await Task.Delay(1600); Save("7-countdown");
             CancelCountdown();
@@ -469,6 +480,7 @@ public partial class NotchWindow : Window
         _devices.Dispose();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _backing?.Dispose();
+        _player.Dispose();
     }
 
     // =======================================================================
@@ -554,6 +566,7 @@ public partial class NotchWindow : Window
     /// <summary>A Windows toast arrived: chat messages go to the Chats tab (ready to reply), everything pops up.</summary>
     private void OnToast(ToastInfo t)
     {
+        _activity.OnToast(t.App, t.Title, t.Body);
         var messenger = ChatService.MessengerOf(t);
         if (messenger != null)
         {
@@ -699,50 +712,112 @@ public partial class NotchWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _suggestTimer.Stop();
-        if (SearchBox.Text.Trim().Length == 0) { _suggestions.Clear(); SearchEmpty.Visibility = Visibility.Visible; return; }
-        _suggestTimer.Start();
+        _searchTimer.Stop();
+        if (SearchBox.Text.Trim().Length == 0) { ShowSearchEmpty("Type a song — results appear as you type and play inside the notch", false); return; }
+        _searchTimer.Start();
     }
 
-    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
+    private async void SearchBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && SearchBox.Text.Trim().Length > 0) { e.Handled = true; OpenYouTube(SearchBox.Text.Trim(), music: Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)); }
+        if (e.Key == Key.Enter && SearchBox.Text.Trim().Length > 0)
+        {
+            e.Handled = true;
+            _searchTimer.Stop();
+            if (_results.Count == 0 || _resultsFor != SearchBox.Text.Trim()) await SearchAsync(SearchBox.Text);
+            if (_results.Count > 0) await PlayResultAsync(0);
+        }
         else if (e.Key == Key.Escape) { e.Handled = true; StopTyping(); }
     }
 
-    private async Task LoadSuggestionsAsync(string query)
+    /// <summary>YouTube results (thumbnail, title, channel, length) for the search box.</summary>
+    private async Task SearchAsync(string query)
     {
         query = query.Trim();
         if (query.Length == 0) return;
+        SearchSpinner.Visibility = Visibility.Visible;
+        SearchSpinner.IsPlaying = true;
         try
         {
-            // YouTube's own search-box suggestions
-            var json = await Http.GetStringAsync("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=en&q=" + Uri.EscapeDataString(query));
-            if (SearchBox.Text.Trim() != query) return;   // user kept typing
-            using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var list = doc.RootElement[1].EnumerateArray().Select(x => x.GetString() ?? "").Where(s => s.Length > 0).Take(6).ToList();
-            _suggestions.Clear();
-            _suggestions.Add(query);
-            foreach (var s in list) if (!string.Equals(s, query, StringComparison.OrdinalIgnoreCase)) _suggestions.Add(s);
-            SearchEmpty.Visibility = Visibility.Collapsed;
+            var list = await YouTubeSearch.SearchAsync(query);
+            if (SearchBox.Text.Trim() != query && App.SnapshotDir == null) return;   // user kept typing
+            _resultsFor = query;
+            _results.Clear();
+            foreach (var r in list)
+            {
+                r.Playing = _player.Current?.Id == r.Id;
+                _results.Add(r);
+            }
+            if (_results.Count == 0) ShowSearchEmpty($"No songs found for “{query}”", true);
+            else
+            {
+                SearchEmpty.Visibility = Visibility.Collapsed;
+                ResultsScroll.ScrollToTop();
+                Stagger(ResultsList);
+            }
         }
         catch (Exception ex)
         {
-            App.Log("suggest: " + ex.Message);
-            _suggestions.Clear();
-            _suggestions.Add(query);
-            SearchEmpty.Visibility = Visibility.Collapsed;
+            App.Log("youtube search: " + ex.Message);
+            ShowSearchEmpty("Couldn't reach YouTube right now", true);
+        }
+        finally
+        {
+            SearchSpinner.IsPlaying = false;
+            SearchSpinner.Visibility = Visibility.Collapsed;
         }
     }
 
-    private void Suggestion_Click(object sender, RoutedEventArgs e)
+    private void ShowSearchEmpty(string text, bool offerBrowser)
     {
-        if ((sender as FrameworkElement)?.Tag is string q) OpenYouTube(q, music: false);
+        _results.Clear();
+        SearchEmptyText.Text = text;
+        SearchOpenYt.Visibility = offerBrowser ? Visibility.Visible : Visibility.Collapsed;
+        SearchEmpty.Visibility = Visibility.Visible;
     }
 
-    private void SuggestionMusic_Click(object sender, RoutedEventArgs e)
+    private async void Result_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is string q) OpenYouTube(q, music: true);
+        if ((sender as FrameworkElement)?.Tag is YtResult r) await PlayResultAsync(_results.IndexOf(r));
+    }
+
+    /// <summary>Plays a result inside the notch (the rest of the results become "up next") and shows it in Media.</summary>
+    private async Task PlayResultAsync(int index)
+    {
+        if (index < 0) return;
+        StopTyping();
+        await _player.PlayAsync(_results, index);
+        Eyes.Express(EyeMood.Happy, 1200);
+        Eyes.Jump(1.1);
+        TabMedia.IsChecked = true;
+    }
+
+    private void SearchOpenYt_Click(object sender, RoutedEventArgs e)
+    {
+        if (SearchBox.Text.Trim().Length > 0) OpenYouTube(SearchBox.Text.Trim(), music: false);
+    }
+
+    // =======================================================================
+    //  Activity: Claude Code sessions, Claude, ChatGPT, VS Code
+    // =======================================================================
+    private void OnActivityChanged(ActivityItem item, ActivityState prev)
+    {
+        ActivityBadge.Visibility = _activity.Items.Any(i => i.State == ActivityState.Working) ? Visibility.Visible : Visibility.Collapsed;
+        ActivityEmpty.Visibility = _activity.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var working = _activity.Items.FirstOrDefault(i => i.State == ActivityState.Working);
+        _activityLine = working == null ? null
+            : $"✦  {working.App} is working{(working.Title is { Length: > 0 } t && t != "Open" ? " on " + t : "")}…";
+        if (prev == ActivityState.Working && item.State == ActivityState.Done && App.SnapshotDir == null)
+        {
+            Eyes.Express(EyeMood.Happy, 1400);
+            ShowPeek($"{item.App} finished", item.Detail.Length > 0 ? item.Detail : item.Title, item.Icon, "", media: false, ms: 5000,
+                app: item.Title is { Length: > 0 } t2 ? $"{item.App}  ·  {t2}" : item.App);
+        }
+        if (_mode == Mode.Collapsed) ApplyCollapsed(animate: true);
+    }
+
+    private void Activity_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ActivityItem a && a.Hwnd != IntPtr.Zero) AppsService.Focus(a.Hwnd);
     }
 
     private void OpenYouTube(string query, bool music)
@@ -988,6 +1063,7 @@ public partial class NotchWindow : Window
         }
         if (_tick % 4 == 0) UpdateFullscreenFade();
         if (_tick % 20 == 0) UpdateBattery();
+        if (_tick % 8 == 4) _activity.Refresh();
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -1261,7 +1337,7 @@ public partial class NotchWindow : Window
 
     /// <summary>The media tab grows taller when the lyrics stage is showing.</summary>
     private double ExpandedHeight =>
-        _tabIndex is 4 or 5 ? ExpandedHChat
+        _tabIndex is 4 or 5 or 6 ? ExpandedHChat
         : _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null ? ExpandedHLyrics : ExpandedH;
 
     private void ApplyCollapsed(bool animate)
@@ -1508,7 +1584,7 @@ public partial class NotchWindow : Window
     {
         var m = _media.Current;
         if (m == null) { _currentLyrics = null; _lyricsKey = null; return; }
-        var wanted = _settings.LyricsEnabled && (m.IsSpotify || LyricsToggle.IsChecked == true);
+        var wanted = _settings.LyricsEnabled && (m.IsSpotify || m.AppId == YouTubePlayer.AppId || LyricsToggle.IsChecked == true);
         if (!wanted) return;
         var key = m.Title + "|" + m.Artist;
         if (key == _lyricsKey) return;
@@ -1529,6 +1605,7 @@ public partial class NotchWindow : Window
                 : "🖐  Hold to restart";
         if (_settings.CaptionsEnabled && !string.IsNullOrWhiteSpace(_captionLine)) return _captionLine;
         if (LyricLine() is { Length: > 0 } l) { _tickerIsLyric = true; return l; }
+        if (_activityLine != null) return _activityLine;
         return null;
     }
 
@@ -1566,7 +1643,7 @@ public partial class NotchWindow : Window
             LineTag.Text = "LYRICS";
             SyncKaraoke(idx, pos, m.IsPlaying);
         }
-        else if (_settings.LyricsEnabled && m != null && (m.IsSpotify || LyricsToggle.IsChecked == true) && _lyricsKey != null)
+        else if (_settings.LyricsEnabled && m != null && (m.IsSpotify || m.AppId == YouTubePlayer.AppId || LyricsToggle.IsChecked == true) && _lyricsKey != null)
         {
             main = "No synced lyrics for this track";
             LineTag.Text = "LYRICS";
@@ -1682,8 +1759,8 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Tabs: sliding glass indicator + directional panel transitions
     // =======================================================================
-    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel, ChatsPanel, SearchPanel };
-    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower, TabChats, TabSearch };
+    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel, ChatsPanel, SearchPanel, ActivityPanel };
+    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower, TabChats, TabSearch, TabActivity };
 
     private void Tab_Checked(object sender, RoutedEventArgs e)
     {
@@ -1705,6 +1782,7 @@ public partial class NotchWindow : Window
 
         if (idx == 1) RefreshApps(forceStagger: true);
         if (idx == 4) UpdateChatsState();
+        if (idx == 6) { _activity.Refresh(); Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Stagger(ActivityList)); }
         if (idx == 5) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => StartTyping(SearchBox));
         if (idx == 0) UpdateMediaPanel(false);
         if (idx == 2) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Stagger(ShelfList));

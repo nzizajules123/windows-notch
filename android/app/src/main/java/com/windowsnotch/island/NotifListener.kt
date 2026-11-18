@@ -63,7 +63,7 @@ class NotifListener : NotificationListenerService() {
         controller?.unregisterCallback(callback)
         controller = null
         Island.controller = null
-        Island.media = null
+        Island.sysMedia = null
     }
 
     override fun onDestroy() {
@@ -91,9 +91,9 @@ class NotifListener : NotificationListenerService() {
     private fun push() {
         val c = controller
         val md = c?.metadata
-        if (c == null || md == null) { Island.media = null; Island.lyrics = null; return }
+        if (c == null || md == null) { Island.sysMedia = null; if (Island.playerMedia == null) Island.lyrics = null; return }
         val title = md.getString(MediaMetadata.METADATA_KEY_TITLE) ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: ""
-        if (title.isBlank()) { Island.media = null; return }
+        if (title.isBlank()) { Island.sysMedia = null; return }
         val artist = md.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: md.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) ?: ""
         val pkg = c.packageName
@@ -108,7 +108,7 @@ class NotifListener : NotificationListenerService() {
             lastArt = (bmp?.asImageBitmap()) to (bmp?.let { accentOf(it) } ?: Color(0xFF30D158))
         }
 
-        Island.media = MediaInfo(
+        Island.sysMedia = MediaInfo(
             key = key, title = title, artist = artist, app = app, packageName = pkg,
             art = lastArt.first, accent = lastArt.second,
             durationMs = md.getLong(MediaMetadata.METADATA_KEY_DURATION),

@@ -22,10 +22,18 @@ that expands on hover into a control center.
   own reply box, so it's sent by the app itself. If that notification is gone, the notch looks for it in Notification
   Center; otherwise it copies your reply and opens the app so you only paste it. (Only messages that arrive while the
   notch is running are shown; it can't read your chat history.)
-- **Search tab**: type a song or artist and YouTube's suggestions appear as you type. Click one to open it on YouTube, or
-  **YT Music** to open it on YouTube Music. Enter opens YouTube; Shift+Enter opens YouTube Music.
-- **Android**: same Chats view with **reply sent through WhatsApp / Instagram's own reply action**, plus a Search view
-  where **Play** starts the top result in YouTube Music (or opens YouTube if it isn't installed).
+- **Search tab, music inside the notch**: type a song or artist and YouTube results (thumbnail, title, channel, length)
+  appear as you type. Click one, or press Enter for the first, and it **plays right in the notch**, with no browser. It uses
+  YouTube's official embedded player in a hidden window and shows in the Media tab with artwork, progress, controls and
+  karaoke lyrics, and the other results become "up next". Videos whose owners don't allow playback outside YouTube are
+  skipped automatically. Click the source chip ("YouTube · notch") in the Media tab to stop it. Results come from
+  YouTube's public search page (no API key), so a YouTube page change can break them until the notch is updated.
+- **Activity tab**: Claude Code sessions (project, working / done, a summary of the latest reply, read from Claude Code's
+  local session files on this PC), the Claude and ChatGPT desktop apps (responding… / reply finished) and VS Code (project
+  · file, busy while building). While one works, the pill says "✦ Claude Code is working on …"; when it finishes, a
+  pop-up shows the summary. Click a card to switch to that app.
+- **Android**: same Chats view with **reply sent through WhatsApp / Instagram's own reply action**, and a Search view whose
+  results **play inside the island** in the same way.
 
 ### The eyes
 

@@ -360,7 +360,7 @@ private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, s
         AnimatedContent(tab, transitionSpec = { (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f)) togetherWith fadeOut(tween(120)) }, label = "tab") { t ->
             when (t) {
                 1 -> ChatsPanel(touched)
-                2 -> SearchPanel(touched)
+                2 -> SearchPanel(touched) { setTab(0) }
                 else -> AnimatedContent(media == null, transitionSpec = { (fadeIn(tween(250)) + scaleIn(initialScale = 0.96f)) togetherWith fadeOut(tween(150)) }, label = "exp") { idle ->
                     if (idle) IdlePanel() else media?.let { MediaPanel(it, accent, now, touched) }
                 }
@@ -483,34 +483,68 @@ private fun ChatView(t: com.windowsnotch.island.ChatThread, touched: () -> Unit)
 // =====================================================================================
 //  Search: YouTube suggestions, Play = top result in YouTube Music
 // =====================================================================================
+/** Results survive switching tabs. */
+private object SearchState {
+    var q by mutableStateOf("")
+    var results by mutableStateOf(listOf<com.windowsnotch.island.YtVideo>())
+    var loading by mutableStateOf(false)
+    var searched by mutableStateOf("")
+}
+
 @Composable
-private fun SearchPanel(touched: () -> Unit) {
+private fun SearchPanel(touched: () -> Unit, playStarted: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var q by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf(listOf<String>()) }
-    LaunchedEffect(q) {
-        if (q.isBlank()) { results = emptyList(); return@LaunchedEffect }
-        delay(220)
-        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.windowsnotch.island.YouTube.suggestions(q.trim()) }
-        results = (listOf(q.trim()) + r.filter { !it.equals(q.trim(), true) }).take(7)
+    val s = SearchState
+    LaunchedEffect(s.q) {
+        val q = s.q.trim()
+        if (q.isEmpty() || q == s.searched) return@LaunchedEffect
+        delay(450)
+        s.loading = true
+        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.windowsnotch.island.NotchPlayer.search(q) }
+        s.loading = false
+        if (s.q.trim() == q) { s.results = r; s.searched = q }
     }
-    val play = { s: String -> touched(); Island.typing = false; Island.react(EyeMood.Happy, 1200); com.windowsnotch.island.YouTube.play(ctx, s) }
+    val play = { i: Int ->
+        touched(); Island.typing = false
+        Island.react(EyeMood.Happy, 1200)
+        com.windowsnotch.island.NotchPlayer.play(s.results, i)
+        playStarted()
+    }
     Column(Modifier.fillMaxSize()) {
-        InputRow(q, { q = it; touched() }, "Search a song or artist…", Ico.Play) { if (q.isNotBlank()) play(q.trim()) }
-        if (results.isEmpty()) Text2("Type to see suggestions · Play starts it in YouTube Music", 11.5f, FgFaint, Modifier.padding(top = 18.dp).align(Alignment.CenterHorizontally))
+        InputRow(s.q, { s.q = it; touched() }, "Search a song — it plays right here", Ico.Search) { if (s.results.isNotEmpty()) play(0) }
+        when {
+            s.loading && s.results.isEmpty() -> Text2("Searching YouTube…", 11.5f, FgFaint, Modifier.padding(top = 18.dp).align(Alignment.CenterHorizontally))
+            s.results.isEmpty() -> Column(Modifier.padding(top = 18.dp).align(Alignment.CenterHorizontally), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text2(if (s.searched.isEmpty()) "Type a song — results play inside the island" else "No songs found", 11.5f, FgFaint)
+                if (s.q.isNotBlank()) Box(Modifier.padding(top = 8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x26FFFFFF))
+                    .clickable { touched(); Island.typing = false; com.windowsnotch.island.YouTube.play(ctx, s.q.trim()) }.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    Text2("Open in YouTube Music instead", 11f, Fg)
+                }
+            }
+        }
         androidx.compose.foundation.lazy.LazyColumn(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            items(results.size) { i ->
-                val s = results[i]
+            items(s.results.size) { i ->
+                val v = s.results[i]
+                val playingNow = com.windowsnotch.island.NotchPlayer.current?.id == v.id && Island.playerMedia != null
+                var thumb by remember(v.id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+                LaunchedEffect(v.id) { thumb = com.windowsnotch.island.NotchPlayer.thumb(v) }
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(Color(0x0FFFFFFF)).clickable { play(s) }.padding(horizontal = 12.dp, vertical = 9.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(Color(0x0FFFFFFF)).clickable { play(i) }.padding(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Ico.Music, FgDim, 15f)
-                    Text2(s, 13f, Fg, Modifier.padding(start = 10.dp).weight(1f))
-                    Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x26FFFFFF)).clickable { touched(); Island.typing = false; com.windowsnotch.island.YouTube.search(ctx, s) }
-                        .padding(horizontal = 9.dp, vertical = 3.dp)) { Text2("YouTube", 10.5f, Fg, weight = FontWeight.SemiBold) }
-                    Box(Modifier.padding(start = 6.dp).size(26.dp).clip(CircleShape).background(Color.White).clickable { play(s) }, contentAlignment = Alignment.Center) {
-                        Icon(Ico.Play, Color.Black, 15f)
+                    Box(Modifier.size(72.dp, 41.dp).clip(RoundedCornerShape(9.dp)).background(Glass)) {
+                        thumb?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                        Box(Modifier.align(Alignment.BottomEnd).padding(3.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xCC000000)).padding(horizontal = 4.dp)) {
+                            Text2(v.length, 9.5f, Fg, weight = FontWeight.SemiBold)
+                        }
+                        if (playingNow) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) { Equalizer(Color.White, Island.playerMedia?.playing == true, 14f) }
+                    }
+                    Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                        Text2(v.title, 12.5f, Fg, weight = FontWeight.SemiBold)
+                        Text2("${v.channel}  ·  ${v.length}", 11f, FgDim)
+                    }
+                    Box(Modifier.padding(start = 6.dp).size(30.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                        Icon(Ico.Play, Color.Black, 16f)
                     }
                 }
             }
@@ -594,14 +628,17 @@ private fun MediaPanel(m: MediaInfo, accent: Color, tick: Long, touched: () -> U
         }
         // controls
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            IconButton2(Ico.Prev, 26f) { touched(); c?.transportControls?.skipToPrevious() }
+            val own = m.packageName == com.windowsnotch.island.NotchPlayer.PKG   // the island's own YouTube player
+            IconButton2(Ico.Prev, 26f) { touched(); if (own) com.windowsnotch.island.NotchPlayer.previous() else c?.transportControls?.skipToPrevious() }
             Spacer(Modifier.width(26.dp))
-            Box(Modifier.size(50.dp).clip(CircleShape).background(Color.White).clickable { touched(); if (m.playing) c?.transportControls?.pause() else c?.transportControls?.play() },
-                contentAlignment = Alignment.Center) {
+            Box(Modifier.size(50.dp).clip(CircleShape).background(Color.White).clickable {
+                touched()
+                if (own) com.windowsnotch.island.NotchPlayer.playPause() else if (m.playing) c?.transportControls?.pause() else c?.transportControls?.play()
+            }, contentAlignment = Alignment.Center) {
                 Icon(if (m.playing) Ico.Pause else Ico.Play, Color.Black, 26f)
             }
             Spacer(Modifier.width(26.dp))
-            IconButton2(Ico.Next, 26f) { touched(); c?.transportControls?.skipToNext() }
+            IconButton2(Ico.Next, 26f) { touched(); if (own) com.windowsnotch.island.NotchPlayer.next() else c?.transportControls?.skipToNext() }
         }
         // karaoke lyrics
         Island.lyrics?.let { ly ->
