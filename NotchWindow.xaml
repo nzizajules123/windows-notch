@@ -181,6 +181,32 @@
                                            MinWidth="22" TextAlignment="Right" VerticalAlignment="Center"/>
                             </StackPanel>
 
+                            <!-- LIVE ACTIVITY: something (Claude, a build, a terminal job…) is working -->
+                            <StackPanel x:Name="LiveLeft" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed">
+                                <Grid Width="24" Height="24">
+                                    <Border Width="18" Height="18" CornerRadius="6" Background="#1FFFFFFF">
+                                        <Grid>
+                                            <Image x:Name="LiveIcon" Width="13" Height="13" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                            <TextBlock x:Name="LiveInitial" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+                                    <Ellipse x:Name="LiveRing" Width="24" Height="24" StrokeThickness="1.8" StrokeDashArray="7 5" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform><RotateTransform x:Name="LiveRingSpin"/></Ellipse.RenderTransform>
+                                        <Ellipse.Effect><DropShadowEffect x:Name="LiveRingGlow" BlurRadius="8" ShadowDepth="0" Opacity="0.9"/></Ellipse.Effect>
+                                    </Ellipse>
+                                </Grid>
+                                <TextBlock x:Name="LiveApp" FontSize="11.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" MaxWidth="92"/>
+                            </StackPanel>
+                            <StackPanel x:Name="LiveRight" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed">
+                                <StackPanel x:Name="LiveDots" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,7,0">
+                                    <Ellipse x:Name="LiveDot1" Width="4" Height="4" Margin="1,0"/>
+                                    <Ellipse x:Name="LiveDot2" Width="4" Height="4" Margin="1,0"/>
+                                    <Ellipse x:Name="LiveDot3" Width="4" Height="4" Margin="1,0"/>
+                                </StackPanel>
+                                <TextBlock x:Name="LiveTime" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
+                            </StackPanel>
+
                             <StackPanel x:Name="MiniLeft" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Border x:Name="MiniThumb" Width="20" Height="20" CornerRadius="6" Margin="0,0,8,0" Visibility="Collapsed"
                                         Background="{StaticResource GlassFill}" RenderTransformOrigin="0.5,0.5">
@@ -713,59 +739,152 @@
                             </StackPanel>
                         </Grid>
 
-                        <!-- ===== ACTIVITY (Claude Code, Claude, ChatGPT, VS Code) ===== -->
-                        <Grid x:Name="ActivityPanel" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
-                            <StackPanel x:Name="ActivityEmpty" VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <!-- ===== ACTIVITY (Claude Code, Claude, ChatGPT, VS Code, Antigravity, terminals) ===== -->
+                        <Grid x:Name="ActivityPanel" Grid.Row="1" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <!-- summary header -->
+                            <Grid Margin="2,0,2,8">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Grid Width="10" Height="10" Margin="0,0,8,0">
+                                        <Ellipse x:Name="ActivityPulse" Fill="#FF5EE0A8" RenderTransformOrigin="0.5,0.5">
+                                            <Ellipse.RenderTransform><ScaleTransform x:Name="ActivityPulseScale"/></Ellipse.RenderTransform>
+                                        </Ellipse>
+                                        <Ellipse Fill="#FF5EE0A8" Width="6" Height="6"/>
+                                    </Grid>
+                                    <TextBlock x:Name="ActivitySummary" Text="All quiet" FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <TextBlock Text="Claude · ChatGPT · VS Code · Antigravity · terminals" FontSize="10.5" Foreground="{StaticResource FgFaint}"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <StackPanel x:Name="ActivityEmpty" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
                                 <Border Width="46" Height="46" CornerRadius="23" Background="#1FFFFFFF" HorizontalAlignment="Center">
                                     <TextBlock Style="{StaticResource Glyph}" Text="&#xE945;" FontSize="19"/>
                                 </Border>
                                 <TextBlock Text="Nothing running" FontSize="14.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,3"/>
-                                <TextBlock Text="Claude Code, Claude, ChatGPT and VS Code show up here while they work"
+                                <TextBlock Text="Claude Code, Claude, ChatGPT, VS Code, Antigravity and terminal jobs show up here while they work"
                                            FontSize="11.5" Foreground="{StaticResource FgDim}" HorizontalAlignment="Center"/>
                             </StackPanel>
-                            <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
                                 <ItemsControl x:Name="ActivityList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Button Style="{StaticResource RowButton}" Margin="0,0,0,6" Padding="10,9" Click="Activity_Click" Tag="{Binding}">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <Grid Width="32" Height="32" VerticalAlignment="Top">
-                                                        <Border CornerRadius="10" Background="#1FFFFFFF"/>
-                                                        <Image Source="{Binding Icon}" Width="22" Height="22"/>
-                                                        <!-- working: spinning ring around the icon -->
-                                                        <Ellipse Width="34" Height="34" StrokeThickness="2" Stroke="#FF0A84FF" StrokeDashArray="6 4"
-                                                                 Visibility="{Binding WorkingVisibility}" RenderTransformOrigin="0.5,0.5">
-                                                            <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
-                                                            <Ellipse.Triggers>
-                                                                <EventTrigger RoutedEvent="Loaded">
-                                                                    <BeginStoryboard><Storyboard>
-                                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="0" To="360"
-                                                                                         Duration="0:0:1.6" RepeatBehavior="Forever"/>
-                                                                    </Storyboard></BeginStoryboard>
-                                                                </EventTrigger>
-                                                            </Ellipse.Triggers>
-                                                        </Ellipse>
-                                                    </Grid>
-                                                    <StackPanel Grid.Column="1" Margin="11,0,0,0">
-                                                        <Grid>
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBlock Text="{Binding App}" FontSize="12.5" FontWeight="SemiBold"/>
-                                                                <TextBlock Text="{Binding Title}" FontSize="11.5" Foreground="{StaticResource FgDim}" Margin="8,1,0,0" TextTrimming="CharacterEllipsis" MaxWidth="290"/>
-                                                            </StackPanel>
-                                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                                <Border CornerRadius="8" Padding="7,1" Background="{Binding StateBrush}">
-                                                                    <TextBlock Text="{Binding StateText}" FontSize="10" FontWeight="SemiBold" Foreground="White"/>
-                                                                </Border>
-                                                                <TextBlock Text="{Binding When}" FontSize="10" Foreground="{StaticResource FgFaint}" Margin="7,1,0,0"/>
-                                                            </StackPanel>
+                                            <Button Style="{StaticResource RowButton}" Margin="0,0,0,7" Padding="0" Click="Activity_Click" Tag="{Binding}">
+                                                <Grid Opacity="{Binding CardOpacity}">
+                                                    <!-- working: brand-coloured glow edge + a slow light sweep across the card -->
+                                                    <Border CornerRadius="13" BorderThickness="1" BorderBrush="{Binding BrandBrush}" Opacity="0.5" Visibility="{Binding WorkingVisibility}">
+                                                        <Border.Effect><DropShadowEffect BlurRadius="14" ShadowDepth="0" Opacity="0.35" Color="White"/></Border.Effect>
+                                                    </Border>
+                                                    <Border CornerRadius="13" Visibility="{Binding WorkingVisibility}">
+                                                        <Border.Background>
+                                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0.35">
+                                                                <GradientStop Color="#00FFFFFF" Offset="0.32"/>
+                                                                <GradientStop Color="#16FFFFFF" Offset="0.5"/>
+                                                                <GradientStop Color="#00FFFFFF" Offset="0.68"/>
+                                                                <LinearGradientBrush.RelativeTransform><TranslateTransform X="-1"/></LinearGradientBrush.RelativeTransform>
+                                                            </LinearGradientBrush>
+                                                        </Border.Background>
+                                                        <Border.Triggers>
+                                                            <EventTrigger RoutedEvent="Loaded">
+                                                                <BeginStoryboard><Storyboard>
+                                                                    <DoubleAnimation Storyboard.TargetProperty="(Border.Background).(Brush.RelativeTransform).(TranslateTransform.X)"
+                                                                                     From="-1" To="1.2" Duration="0:0:2.4" RepeatBehavior="Forever">
+                                                                        <DoubleAnimation.EasingFunction><SineEase EasingMode="EaseInOut"/></DoubleAnimation.EasingFunction>
+                                                                    </DoubleAnimation>
+                                                                </Storyboard></BeginStoryboard>
+                                                            </EventTrigger>
+                                                        </Border.Triggers>
+                                                    </Border>
+
+                                                    <Grid Margin="11,10,12,10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <!-- app icon with an orbiting comet ring while working, ✓ badge when done -->
+                                                        <Grid Width="42" Height="42" VerticalAlignment="Top">
+                                                            <Border Width="32" Height="32" CornerRadius="10" Background="{Binding BrandSoft}">
+                                                                <Grid>
+                                                                    <Image Source="{Binding Icon}" Width="20" Height="20" Visibility="{Binding IconVisibility}" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                                    <TextBlock Text="{Binding Initial}" FontWeight="Bold" FontSize="13" Foreground="{Binding BrandBrush}"
+                                                                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding InitialVisibility}"/>
+                                                                </Grid>
+                                                            </Border>
+                                                            <Ellipse Width="41" Height="41" StrokeThickness="2.4" Stroke="{Binding BrandRing}" StrokeDashArray="11 6"
+                                                                     StrokeDashCap="Round" Visibility="{Binding WorkingVisibility}" RenderTransformOrigin="0.5,0.5">
+                                                                <Ellipse.RenderTransform><RotateTransform/></Ellipse.RenderTransform>
+                                                                <Ellipse.Effect><DropShadowEffect BlurRadius="10" ShadowDepth="0" Opacity="0.8" Color="White"/></Ellipse.Effect>
+                                                                <Ellipse.Triggers>
+                                                                    <EventTrigger RoutedEvent="Loaded">
+                                                                        <BeginStoryboard><Storyboard>
+                                                                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)" From="0" To="360"
+                                                                                             Duration="0:0:1.4" RepeatBehavior="Forever"/>
+                                                                        </Storyboard></BeginStoryboard>
+                                                                    </EventTrigger>
+                                                                </Ellipse.Triggers>
+                                                            </Ellipse>
+                                                            <Border Width="15" Height="15" CornerRadius="7.5" Background="#FF30D158" BorderBrush="#FF111114" BorderThickness="2"
+                                                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2" Visibility="{Binding DoneVisibility}">
+                                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE73E;" FontSize="7" Foreground="Black" FontWeight="Bold"/>
+                                                            </Border>
                                                         </Grid>
-                                                        <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{StaticResource FgDim}" TextWrapping="Wrap" MaxHeight="34"
-                                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                                                    </StackPanel>
+
+                                                        <StackPanel Grid.Column="1" Margin="10,1,10,0">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding App}" FontSize="13" FontWeight="SemiBold"/>
+                                                                <TextBlock Text="{Binding Title}" FontSize="11.5" Foreground="{StaticResource FgFaint}" Margin="7,1.5,0,0"
+                                                                           TextTrimming="CharacterEllipsis" MaxWidth="250"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Detail}" FontSize="11.5" Foreground="{StaticResource FgDim}" TextWrapping="Wrap" MaxHeight="34"
+                                                                       TextTrimming="CharacterEllipsis" Margin="0,3,0,0" FontFamily="Segoe UI Variable Text, Segoe UI"/>
+                                                        </StackPanel>
+
+                                                        <!-- status: brand pill with typing dots + live timer while working -->
+                                                        <StackPanel Grid.Column="2" VerticalAlignment="Top" HorizontalAlignment="Right">
+                                                            <Border CornerRadius="9" Padding="8,2" Background="{Binding BrandSoft}" Visibility="{Binding WorkingVisibility}">
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                                        <StackPanel.Resources>
+                                                                            <Style TargetType="Ellipse">
+                                                                                <Setter Property="Width" Value="4"/>
+                                                                                <Setter Property="Height" Value="4"/>
+                                                                                <Setter Property="Margin" Value="1,0"/>
+                                                                            </Style>
+                                                                        </StackPanel.Resources>
+                                                                        <Ellipse Fill="{Binding BrandBrush}">
+                                                                            <Ellipse.Triggers><EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                                                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity" Duration="0:0:1.1">
+                                                                                    <LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0"/><LinearDoubleKeyFrame Value="1" KeyTime="0:0:0.25"/><LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0.55"/>
+                                                                                </DoubleAnimationUsingKeyFrames></Storyboard></BeginStoryboard></EventTrigger></Ellipse.Triggers>
+                                                                        </Ellipse>
+                                                                        <Ellipse Fill="{Binding BrandBrush}">
+                                                                            <Ellipse.Triggers><EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                                                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity" Duration="0:0:1.1">
+                                                                                    <LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0.15"/><LinearDoubleKeyFrame Value="1" KeyTime="0:0:0.4"/><LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0.7"/>
+                                                                                </DoubleAnimationUsingKeyFrames></Storyboard></BeginStoryboard></EventTrigger></Ellipse.Triggers>
+                                                                        </Ellipse>
+                                                                        <Ellipse Fill="{Binding BrandBrush}">
+                                                                            <Ellipse.Triggers><EventTrigger RoutedEvent="Loaded"><BeginStoryboard><Storyboard RepeatBehavior="Forever">
+                                                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity" Duration="0:0:1.1">
+                                                                                    <LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0.3"/><LinearDoubleKeyFrame Value="1" KeyTime="0:0:0.55"/><LinearDoubleKeyFrame Value="0.25" KeyTime="0:0:0.85"/>
+                                                                                </DoubleAnimationUsingKeyFrames></Storyboard></BeginStoryboard></EventTrigger></Ellipse.Triggers>
+                                                                        </Ellipse>
+                                                                    </StackPanel>
+                                                                    <TextBlock Text="{Binding Elapsed}" FontSize="10.5" FontWeight="SemiBold" Foreground="{Binding BrandBrush}"
+                                                                               Typography.NumeralAlignment="Tabular"/>
+                                                                </StackPanel>
+                                                            </Border>
+                                                            <Border CornerRadius="9" Padding="8,2" Background="#2630D158" Visibility="{Binding DoneVisibility}">
+                                                                <TextBlock Text="Done" FontSize="10.5" FontWeight="SemiBold" Foreground="#FF5EE082"/>
+                                                            </Border>
+                                                            <TextBlock Text="{Binding When}" FontSize="10" Foreground="{StaticResource FgFaint}" HorizontalAlignment="Right" Margin="0,4,2,0"/>
+                                                        </StackPanel>
+                                                    </Grid>
                                                 </Grid>
                                             </Button>
                                         </DataTemplate>

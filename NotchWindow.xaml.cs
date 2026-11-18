@@ -49,6 +49,9 @@ public partial class NotchWindow : Window
     private readonly YouTubePlayer _player = new();
     private readonly ActivityService _activity = new();
     private string? _activityLine;
+    private ActivityItem? _live;
+    private bool _liveShown;
+    private const double CollapsedWLive = 312;
     private static readonly System.Net.Http.HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
     private bool _typing;
     private readonly DeviceWatcher _devices = new();
@@ -453,9 +456,21 @@ public partial class NotchWindow : Window
             SearchBox.Text = "indila";
             await SearchAsync("indila");
             await Task.Delay(2500); Save("12-search");
-            _activity.Refresh();
+            _activity.Items.Clear();
+            _activity.Items.Add(new ActivityItem { Key = "s1", App = "Claude Code", Kind = "session", Title = "Windows Notch",
+                Detail = "Building the live-activity animations: orbiting ring, light sweep and a ticking timer…", State = ActivityState.Working, StartedAt = DateTime.Now.AddSeconds(-84) });
+            _activity.Items.Add(new ActivityItem { Key = "t1", App = "Terminal", Kind = "terminal", Title = "terminal",
+                Detail = "Running  dotnet publish -c Release -r win-x64", State = ActivityState.Working, StartedAt = DateTime.Now.AddSeconds(-23) });
+            _activity.Items.Add(new ActivityItem { Key = "a1", App = "Antigravity", Kind = "app", Title = "landing-page  ·  App.tsx",
+                Detail = "Finished working", State = ActivityState.Done });
+            _activity.Items.Add(new ActivityItem { Key = "c1", App = "ChatGPT", Kind = "app", Title = "Open", Detail = "Reply finished", State = ActivityState.Idle });
+            UpdateLive();
             TabActivity.IsChecked = true;
-            await Task.Delay(1200); Save("13-activity");
+            await Task.Delay(1500); Save("13-activity");
+            Collapse();
+            await Task.Delay(1600); Save("14-live-pill");
+            Expand();
+            await Task.Delay(600);
             StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", () => { });
             await Task.Delay(1600); Save("7-countdown");
             CancelCountdown();
@@ -801,11 +816,7 @@ public partial class NotchWindow : Window
     // =======================================================================
     private void OnActivityChanged(ActivityItem item, ActivityState prev)
     {
-        ActivityBadge.Visibility = _activity.Items.Any(i => i.State == ActivityState.Working) ? Visibility.Visible : Visibility.Collapsed;
-        ActivityEmpty.Visibility = _activity.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        var working = _activity.Items.FirstOrDefault(i => i.State == ActivityState.Working);
-        _activityLine = working == null ? null
-            : $"✦  {working.App} is working{(working.Title is { Length: > 0 } t && t != "Open" ? " on " + t : "")}…";
+        UpdateLive();
         if (prev == ActivityState.Working && item.State == ActivityState.Done && App.SnapshotDir == null)
         {
             Eyes.Express(EyeMood.Happy, 1400);
@@ -813,6 +824,82 @@ public partial class NotchWindow : Window
                 app: item.Title is { Length: > 0 } t2 ? $"{item.App}  ·  {t2}" : item.App);
         }
         if (_mode == Mode.Collapsed) ApplyCollapsed(animate: true);
+    }
+
+    /// <summary>Picks the job shown live in the pill and refreshes the Activity header / badge.</summary>
+    private void UpdateLive()
+    {
+        var working = _activity.Items.Where(i => i.State == ActivityState.Working).ToList();
+        var done = _activity.Items.Count(i => i.State == ActivityState.Done);
+        ActivityBadge.Visibility = working.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ActivityEmpty.Visibility = _activity.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ActivitySummary.Text = working.Count == 0 && done == 0 ? "All quiet"
+            : string.Join("  ·  ", new[] { working.Count > 0 ? $"{working.Count} working" : null, done > 0 ? $"{done} done" : null }.Where(s => s != null));
+
+        // most interesting first: Claude Code, then terminal jobs, then the apps
+        var live = working.OrderBy(i => i.Kind == "session" ? 0 : i.Kind == "terminal" ? 1 : 2).ThenBy(i => i.StartedAt).FirstOrDefault();
+        var brand = live?.Brand ?? Color.FromRgb(0x5E, 0xE0, 0xA8);
+        ActivityPulse.Fill = new SolidColorBrush(brand);
+        if (live != _live)
+        {
+            _live = live;
+            if (live != null)
+            {
+                LiveIcon.Source = live.Icon;
+                LiveInitial.Text = live.Icon == null ? live.Initial : "";
+                LiveInitial.Foreground = live.BrandBrush;
+                LiveApp.Text = live.App;
+                LiveRing.Stroke = live.BrandRing;
+                LiveRingGlow.Color = brand;
+                foreach (var d in new[] { LiveDot1, LiveDot2, LiveDot3 }) d.Fill = live.BrandBrush;
+                LiveTime.Foreground = live.BrandBrush;
+            }
+        }
+        if (live != null) LiveTime.Text = live.Elapsed;
+        var line = live == null ? null : $"{live.App}  ·  {(live.Detail.Length > 0 ? live.Detail : "working…")}";
+        if (line != _activityLine)
+        {
+            _activityLine = line;
+            if (_mode == Mode.Collapsed) ApplyCollapsed(animate: true);
+        }
+    }
+
+    /// <summary>Swaps the pill between its normal layout and the live-activity layout.</summary>
+    private void SetLiveMode(bool on)
+    {
+        if (on != _liveShown)
+        {
+            _liveShown = on;
+            var (show, hide) = on ? (new UIElement[] { LiveLeft, LiveRight }, new UIElement[] { MiniLeft, MiniRight })
+                                  : (new UIElement[] { MiniLeft, MiniRight }, new UIElement[] { LiveLeft, LiveRight });
+            foreach (var h in hide) Motion.Hide(h, 140);
+            foreach (var s in show) { s.Visibility = Visibility.Visible; s.Opacity = 0; Motion.Show(s, 320, 120, blur: 6, fromY: 4); }
+            if (on) { Eyes.Express(EyeMood.Surprised, 500); Eyes.Attend(-3, 0, 1200); }
+            return;
+        }
+        // keep the two layouts from overlapping after the volume / Wi-Fi overlay
+        if (on && !_hudShown) { MiniLeft.Visibility = Visibility.Collapsed; MiniRight.Visibility = Visibility.Collapsed; }
+    }
+
+    private void StartLiveLoops()
+    {
+        LiveRingSpin.BeginAnimation(RotateTransform.AngleProperty, new DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.3)) { RepeatBehavior = RepeatBehavior.Forever });
+        var i = 0;
+        foreach (var d in new[] { LiveDot1, LiveDot2, LiveDot3 })
+        {
+            var a = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromSeconds(1.1), RepeatBehavior = RepeatBehavior.Forever };
+            var t0 = i * 0.15;
+            a.KeyFrames.Add(new LinearDoubleKeyFrame(0.25, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t0))));
+            a.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t0 + 0.25))));
+            a.KeyFrames.Add(new LinearDoubleKeyFrame(0.25, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t0 + 0.55))));
+            d.BeginAnimation(OpacityProperty, a);
+            i++;
+        }
+        // breathing dot in the Activity header
+        var grow = new DoubleAnimation(1, 2.4, TimeSpan.FromSeconds(1.6)) { RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Motion.Out };
+        ActivityPulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        ActivityPulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+        ActivityPulse.BeginAnimation(OpacityProperty, new DoubleAnimation(0.7, 0, TimeSpan.FromSeconds(1.6)) { RepeatBehavior = RepeatBehavior.Forever });
     }
 
     private void Activity_Click(object sender, RoutedEventArgs e)
@@ -999,8 +1086,8 @@ public partial class NotchWindow : Window
         {
             _hudShown = true;
             if (value.HasValue) HudFill.Width = Math.Clamp(value.Value, 0, 1) * HudTrack.Width;
-            Motion.Hide(MiniLeft, 120);
-            Motion.Hide(MiniRight, 120);
+            foreach (var el in new UIElement[] { MiniLeft, MiniRight, LiveLeft, LiveRight })
+                if (el.Visibility == Visibility.Visible) Motion.Hide(el, 120);
             foreach (var el in new UIElement[] { HudLeft, HudRight })
             {
                 el.Visibility = Visibility.Visible;
@@ -1024,7 +1111,7 @@ public partial class NotchWindow : Window
         _hudShown = false;
         Motion.Hide(HudLeft, 120);
         Motion.Hide(HudRight, 120);
-        foreach (var el in new UIElement[] { MiniLeft, MiniRight })
+        foreach (var el in _liveShown ? new UIElement[] { LiveLeft, LiveRight } : new UIElement[] { MiniLeft, MiniRight })
         {
             el.Visibility = Visibility.Visible;
             el.Opacity = 0;
@@ -1064,11 +1151,13 @@ public partial class NotchWindow : Window
         if (_tick % 4 == 0) UpdateFullscreenFade();
         if (_tick % 20 == 0) UpdateBattery();
         if (_tick % 8 == 4) _activity.Refresh();
+        if (_tick % 4 == 0) { _activity.Tick(); UpdateLive(); }
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
     private void StartAmbientLoops()
     {
+        StartLiveLoops();
         LiveGlowLine.BeginAnimation(OpacityProperty, new DoubleAnimation(0.3, 1, TimeSpan.FromSeconds(1.6))
         { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = Motion.InOut });
 
@@ -1375,8 +1464,13 @@ public partial class NotchWindow : Window
         var playing = _media.Current?.IsPlaying == true;
         if (playing != _eyesDancing) { _eyesDancing = playing; Eyes.SetDancing(playing); }
 
+        // live activity takes over the pill while something works (music still wins)
+        var live = _live != null && !playing && !_hudShown;
+        SetLiveMode(live);
+
         var w = _hudShown ? Math.Max(HudW, showTicker ? CollapsedWTicker : 0)
-              : showTicker ? CollapsedWTicker : MediaActive ? CollapsedWMedia : CollapsedW;
+              : showTicker ? Math.Max(CollapsedWTicker, live ? CollapsedWLive : 0)
+              : live ? CollapsedWLive : MediaActive ? CollapsedWMedia : CollapsedW;
         var h = CollapsedH + (showTicker ? TickerH : 0);
         Morph(w, h, showTicker ? 22 : CollapsedRadius, animate ? 480 : 0, 0.3);
     }

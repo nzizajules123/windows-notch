@@ -22,6 +22,31 @@ public sealed class ActivityItem : INotifyPropertyChanged
     public ImageSource? Icon { get; set; }
     public IntPtr Hwnd { get; set; }
 
+    /// <summary>The app's own colour (Claude orange, VS Code blue…) for rings, glows and pills.</summary>
+    public Color Brand => ActivityService.BrandOf(App);
+    public Brush BrandBrush => new SolidColorBrush(Brand);
+    public Brush BrandSoft => new SolidColorBrush(Color.FromArgb(0x33, Brand.R, Brand.G, Brand.B));
+    public Brush BrandRing => new LinearGradientBrush(new GradientStopCollection
+    {
+        new(Color.FromArgb(0, Brand.R, Brand.G, Brand.B), 0), new(Color.FromArgb(0xFF, Brand.R, Brand.G, Brand.B), 0.85), new(Colors.White, 1),
+    }, 0);
+    public string Initial => App.Length > 0 ? App[..1] : "?";
+    public Visibility IconVisibility => Icon != null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility InitialVisibility => Icon == null ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>When the current job started (for the live timer).</summary>
+    public DateTime StartedAt { get; set; } = DateTime.Now;
+    public string Elapsed
+    {
+        get
+        {
+            var d = DateTime.Now - StartedAt;
+            return d.TotalHours >= 1 ? $"{(int)d.TotalHours}:{d.Minutes:00}:{d.Seconds:00}" : $"{(int)d.TotalMinutes}:{d.Seconds:00}";
+        }
+    }
+    public Visibility DoneVisibility => _state == ActivityState.Done ? Visibility.Visible : Visibility.Collapsed;
+    public double CardOpacity => _state == ActivityState.Idle ? 0.62 : 1;
+
     private string _title = "", _detail = "";
     private ActivityState _state;
     private DateTime _since = DateTime.Now;
@@ -31,7 +56,14 @@ public sealed class ActivityItem : INotifyPropertyChanged
     public ActivityState State
     {
         get => _state;
-        set { if (_state == value) return; _state = value; _since = DateTime.Now; Changed(); Changed(nameof(StateText)); Changed(nameof(StateBrush)); Changed(nameof(WorkingVisibility)); }
+        set
+        {
+            if (_state == value) return;
+            if (value == ActivityState.Working && _state != ActivityState.Working) StartedAt = DateTime.Now;
+            _state = value; _since = DateTime.Now;
+            Changed(); Changed(nameof(StateText)); Changed(nameof(StateBrush)); Changed(nameof(WorkingVisibility));
+            Changed(nameof(DoneVisibility)); Changed(nameof(CardOpacity)); Changed(nameof(Elapsed));
+        }
     }
     public string StateText => _state switch
     {
@@ -41,12 +73,13 @@ public sealed class ActivityItem : INotifyPropertyChanged
     };
     public Brush StateBrush => _state switch
     {
-        ActivityState.Working => new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)),
+        ActivityState.Working => new SolidColorBrush(Brand),
         ActivityState.Done => new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x58)),
         _ => new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF)),
     };
     public Visibility WorkingVisibility => _state == ActivityState.Working ? Visibility.Visible : Visibility.Collapsed;
-    public void Touch() => Changed(nameof(When));
+    public void Touch() { Changed(nameof(When)); if (_state == ActivityState.Working) Changed(nameof(Elapsed)); }
+    public void IconChanged() { Changed(nameof(Icon)); Changed(nameof(IconVisibility)); Changed(nameof(InitialVisibility)); }
     public string When
     {
         get
@@ -76,8 +109,20 @@ public sealed class ActivityService
 
     private static readonly (string proc, string app, double busyCpu)[] Apps =
     {
-        ("claude", "Claude", 6), ("ChatGPT", "ChatGPT", 6), ("Code", "VS Code", 14),
+        ("claude", "Claude", 6), ("ChatGPT", "ChatGPT", 6), ("Code", "VS Code", 14), ("Antigravity", "Antigravity", 14),
     };
+
+    public static Color BrandOf(string app) => app switch
+    {
+        "Claude Code" or "Claude" => Color.FromRgb(0xE0, 0x7A, 0x5F),     // Claude coral
+        "ChatGPT" => Color.FromRgb(0x10, 0xA3, 0x7F),                        // ChatGPT green
+        "VS Code" => Color.FromRgb(0x2D, 0x9C, 0xFF),                        // VS Code blue
+        "Antigravity" => Color.FromRgb(0x8A, 0x7C, 0xFF),                    // Antigravity violet
+        "Cursor" => Color.FromRgb(0xC9, 0xCD, 0xD6),
+        _ => Color.FromRgb(0x5E, 0xE0, 0xA8),                                // terminal mint
+    };
+
+    private bool _scanning;
 
     public void Refresh()
     {
@@ -87,6 +132,121 @@ public sealed class ActivityService
             try { RefreshApp(proc, app, busy); } catch (Exception ex) { App.Log($"activity {app}: {ex.Message}"); }
         }
         foreach (var i in Items) i.Touch();
+        // terminal jobs: read the process tree off the UI thread, apply here
+        if (!_scanning)
+        {
+            _scanning = true;
+            var ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            Task.Run(ScanTerminals).ContinueWith(t =>
+            {
+                ui.BeginInvoke(() => { _scanning = false; if (t.Status == TaskStatus.RanToCompletion) ApplyTerminals(t.Result); });
+            });
+        }
+    }
+
+    /// <summary>Called every second by the notch so working timers tick smoothly.</summary>
+    public void Tick() { foreach (var i in Items) if (i.State == ActivityState.Working) i.Touch(); }
+
+    // ------------------------------------------------------------------ terminal jobs (real commands)
+    private sealed record Job(string Owner, string Command, DateTime Started, int Pid);
+
+    private static readonly HashSet<string> Shells = new(StringComparer.OrdinalIgnoreCase)
+        { "powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe", "wsl.exe", "zsh.exe", "nu.exe", "sh.exe" };
+    private static readonly HashSet<string> Ignore = new(StringComparer.OrdinalIgnoreCase)
+        { "conhost.exe", "OpenConsole.exe", "ssh-agent.exe", "WindowsNotch.exe", "rtk.exe", "more.com", "less.exe" };
+    private static readonly (string exe, string owner)[] Owners =
+    {
+        ("claude.exe", "Claude Code"), ("Code.exe", "VS Code"), ("Antigravity.exe", "Antigravity"), ("Cursor.exe", "Cursor"),
+        ("WindowsTerminal.exe", "Terminal"), ("explorer.exe", "Terminal"),
+    };
+
+    /// <summary>Commands running inside a shell (Windows Terminal, VS Code / Antigravity terminals, Claude Code's tools).</summary>
+    private static List<Job> ScanTerminals()
+    {
+        var procs = new Dictionary<int, (int parent, string name, string cmd, DateTime started)>();
+        using (var s = new System.Management.ManagementObjectSearcher("SELECT ProcessId, ParentProcessId, Name, CommandLine, CreationDate FROM Win32_Process"))
+            foreach (System.Management.ManagementObject o in s.Get())
+            {
+                using (o)
+                {
+                    var pid = Convert.ToInt32(o["ProcessId"]);
+                    var started = DateTime.Now;
+                    try { started = System.Management.ManagementDateTimeConverter.ToDateTime(o["CreationDate"]?.ToString() ?? ""); } catch { }
+                    procs[pid] = (Convert.ToInt32(o["ParentProcessId"]), o["Name"]?.ToString() ?? "", o["CommandLine"]?.ToString() ?? "", started);
+                }
+            }
+
+        string? OwnerOf(int pid)
+        {
+            for (int hops = 0; hops < 12 && procs.TryGetValue(pid, out var p); hops++)
+            {
+                foreach (var (exe, owner) in Owners) if (p.name.Equals(exe, StringComparison.OrdinalIgnoreCase)) return owner;
+                if (p.parent == pid) break;
+                pid = p.parent;
+            }
+            return null;
+        }
+
+        var jobs = new List<Job>();
+        foreach (var (pid, p) in procs)
+        {
+            if (Shells.Contains(p.name) || Ignore.Contains(p.name)) continue;
+            if (!procs.TryGetValue(p.parent, out var parent) || !Shells.Contains(parent.name)) continue;   // only direct children of a shell
+            if (DateTime.Now - p.started < TimeSpan.FromSeconds(1.5)) continue;                             // skip blink-and-gone commands
+            var owner = OwnerOf(p.parent);
+            if (owner == null) continue;
+            jobs.Add(new Job(owner, ShortCommand(p.name, p.cmd), p.started, pid));
+        }
+        return jobs;
+    }
+
+    private static string ShortCommand(string exe, string cmd)
+    {
+        var c = cmd.Trim();
+        if (c.Length == 0) return Path.GetFileNameWithoutExtension(exe);
+        // drop the program's full path: "C:\Program Files\dotnet\dotnet.exe" publish …  →  dotnet publish …
+        var m = Regex.Match(c, "^\"?([^\"]*?\\\\)?([^\\\\\" ]+?)(\\.exe)?\"?(\\s+(.*))?$", RegexOptions.IgnoreCase);
+        var name = m.Success ? m.Groups[2].Value : Path.GetFileNameWithoutExtension(exe);
+        var args = m.Success ? m.Groups[5].Value : "";
+        args = Regex.Replace(args, "\"?[A-Za-z]:\\\\[^\" ]*\\\\([^\\\\\" ]+)\"?", "$1");   // shorten path arguments to file names
+        var s = (name + " " + args).Trim();
+        return s.Length > 64 ? s[..63] + "…" : s;
+    }
+
+    private readonly Dictionary<string, string> _lastJob = new();
+
+    private void ApplyTerminals(List<Job> jobs)
+    {
+        foreach (var owner in jobs.Select(j => j.Owner).Concat(Items.Where(i => i.Kind == "terminal").Select(i => i.App)).Distinct().ToList())
+        {
+            var key = "term:" + owner;
+            var mine = jobs.Where(j => j.Owner == owner).OrderBy(j => j.Started).ToList();
+            var item = Items.FirstOrDefault(i => i.Key == key);
+            if (mine.Count > 0)
+            {
+                if (item == null)
+                {
+                    item = new ActivityItem { Key = key, App = owner, Kind = "terminal", Icon = IconFor(owner switch { "Claude Code" => "claude", "VS Code" => "Code", "Antigravity" => "Antigravity", "Cursor" => "Cursor", _ => "WindowsTerminal" }) };
+                    Items.Insert(0, item);
+                }
+                var first = mine[0];
+                item.Title = owner == "Terminal" ? "terminal" : "terminal";
+                item.Detail = $"Running  {first.Command}" + (mine.Count > 1 ? $"   (+{mine.Count - 1} more)" : "");
+                _lastJob[key] = first.Command;
+                SetState(item, ActivityState.Working);
+                item.StartedAt = first.Started;
+            }
+            else if (item != null)
+            {
+                if (item.State == ActivityState.Working)
+                {
+                    var took = DateTime.Now - item.StartedAt;
+                    item.Detail = $"Finished  {_lastJob.GetValueOrDefault(key, "command")}  ·  {(took.TotalMinutes >= 1 ? $"{(int)took.TotalMinutes}m {took.Seconds}s" : $"{took.Seconds}s")}";
+                    SetState(item, ActivityState.Done);
+                }
+                else if (item.State == ActivityState.Done && DateTime.Now - item.Since > TimeSpan.FromMinutes(5)) Items.Remove(item);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ Claude Code (transcripts)
