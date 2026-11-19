@@ -39,6 +39,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -107,19 +110,43 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     var mode by remember { mutableStateOf(if (demo) Mode.Collapsed else Mode.Intro) }
     var peek by remember { mutableStateOf<IslandEvent?>(null) }
     var lastTouch by remember { mutableLongStateOf(0L) }
-    var tab by remember { mutableIntStateOf(0) }          // 0 media · 1 chats · 2 search
+    var tab by remember { mutableIntStateOf(0) }          // 0 media · 1 chats · 2 search · 3 alerts · 4 to-do
     val media = Island.media
     val playing = media?.playing == true
     val accent = media?.accent ?: Green
     val volume = peek as? IslandEvent.Volume
     val hasLyrics = Island.lyrics != null && media != null
+    /** Notifications that arrived while the current pop-up was up (newest first) → "View all · N". */
+    val stack = remember { androidx.compose.runtime.mutableStateListOf<IslandEvent.Notification>() }
+
+    // the current lyric line, shown under the small pill while music plays
+    var lyric by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(playing, Island.lyrics, media?.key) {
+        if (!playing || Island.lyrics == null) { lyric = null; return@LaunchedEffect }
+        while (true) {
+            val m = Island.media; val ly = Island.lyrics
+            lyric = if (m != null && ly != null && m.playing) ly.indexAt(m.livePosition()).let { i ->
+                if (i >= 0) ly.lines[i].text.takeIf { it.isNotBlank() && it != "♪" } else null
+            } else null
+            delay(250)
+        }
+    }
 
     // ---- size of the island for each state
-    val slot = if (playing) 48f else 46f
+    val slot = when {
+        playing -> 48f
+        geo.hasCutout -> 76f      // time + eyes | battery %
+        else -> 56f
+    }
+    val ticker = lyric != null && volume == null
     val (tw, th, tr) = when (mode) {
         Mode.Intro -> Triple(pillH, pillH, pillH / 2)
-        Mode.Collapsed -> if (volume != null) Triple(minOf(sw - 24f, 300f), pillH, pillH / 2) else Triple(camGap + 2 * slot, pillH, pillH / 2)
-        Mode.Peek -> Triple(minOf(sw - 16f, 390f), pillH + if (peek is IslandEvent.Notification) 96f else 56f, 28f)
+        Mode.Collapsed -> when {
+            volume != null -> Triple(minOf(sw - 24f, 300f), pillH, pillH / 2)
+            ticker -> Triple(maxOf(camGap + 2 * slot, minOf(sw - 24f, 330f)), pillH + 24f, 18f)
+            else -> Triple(camGap + 2 * slot, pillH, pillH / 2)
+        }
+        Mode.Peek -> Triple(minOf(sw - 16f, 390f), pillH + if (peek is IslandEvent.Notification || peek is IslandEvent.Reminder) 96f else 56f, 28f)
         Mode.Expanded -> Triple(minOf(sw - 12f, 440f), pillH + 44f + when {
             tab != 0 -> 290f
             media == null -> 132f
@@ -139,12 +166,24 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
     // ---- events → peek / volume HUD
     LaunchedEffect(Island.eventId) {
         val e = Island.event ?: return@LaunchedEffect
-        if (mode == Mode.Intro || mode == Mode.Expanded) return@LaunchedEffect
-        if (e is IslandEvent.Notification) Island.react(EyeMood.Surprised, 700)
+        if (mode == Mode.Intro) return@LaunchedEffect
+        // while open only reminders interrupt (notifications are kept in the Alerts tab)
+        if (mode == Mode.Expanded && (e !is IslandEvent.Reminder || Island.typing)) return@LaunchedEffect
+        if (e is IslandEvent.Notification) {
+            Island.react(EyeMood.Surprised, 700)
+            if (peek !is IslandEvent.Notification) stack.clear()
+            stack.add(0, e)
+        }
         peek = e
         mode = if (e is IslandEvent.Volume) Mode.Collapsed else Mode.Peek
-        delay(when (e) { is IslandEvent.Volume -> 1600; is IslandEvent.Charge -> 3400; else -> 4800 })
+        delay(when (e) {
+            is IslandEvent.Volume -> 1600
+            is IslandEvent.Charge -> 3400
+            is IslandEvent.Reminder -> 20_000
+            else -> if (stack.size > 1) 6500 else 4800
+        })
         peek = null
+        stack.clear()
         if (mode == Mode.Peek) mode = Mode.Collapsed
     }
     // ---- close when touching outside, or after a few idle seconds
@@ -185,19 +224,28 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
             bubble = null
         }
         val shape = RoundedCornerShape(r.value.dp)
+        // smoked glass washed with the colour of what's playing (not flat black)
+        val bg = if (open) Brush.verticalGradient(listOf(lerpC(Color(0xFF16161B), accent, 0.17f), Color(0xFF111115), Color(0xFF0C0C0F)))
+                 else Brush.horizontalGradient(listOf(lerpC(Color(0xFF17171C), accent, 0.24f), Color(0xFF0E0E12), Color(0xFF0E0E12), lerpC(Color(0xFF17171C), accent, 0.14f)))
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
                 .size(w.value.dp, h.value.dp)
-                .then(if (open) Modifier.shadow(18.dp, shape, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
+                .shadow(if (open) 18.dp else 6.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(shape)
-                .background(Color.Black)
-                .border(0.8.dp, if (open) GlassStroke else Color.Transparent, shape)
+                .background(bg)
+                .border(0.8.dp, if (open) GlassStroke else Color(0x1CFFFFFF), shape)
                 .clickable(remember { MutableInteractionSource() }, indication = null) {
                     lastTouch = SystemClock.elapsedRealtime()
                     if (mode != Mode.Expanded) {
                         val chat = (peek as? IslandEvent.Notification)?.chat
-                        tab = if (chat != null) 1 else if (media == null && Island.chats.any { it.unread > 0 }) 1 else 0
+                        tab = when {
+                            peek is IslandEvent.Reminder -> 4
+                            chat != null -> 1
+                            stack.size > 1 -> 3
+                            media == null && Island.chats.any { it.unread > 0 } -> 1
+                            else -> 0
+                        }
                         if (chat != null) Island.openChat = chat
                         peek = null
                         mode = Mode.Expanded
@@ -205,10 +253,18 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
                 },
         ) {
             when (mode) {
-                Mode.Collapsed -> Collapsed(geo, pillH, camGap, media, accent, volume)
+                Mode.Collapsed -> Collapsed(geo, pillH, camGap, media, accent, volume, if (ticker) lyric else null)
                 Mode.Peek -> when (val p = peek) {
+                    is IslandEvent.Reminder -> ReminderCard(
+                        p.item, pillH,
+                        onDone = { if (!p.item.done) com.windowsnotch.island.Todo.toggle(p.item); Island.react(EyeMood.Happy, 1200); peek = null; mode = Mode.Collapsed },
+                        onSnooze = { com.windowsnotch.island.Todo.snooze(p.item, 10 * 60_000L); peek = null; mode = Mode.Collapsed },
+                        onDismiss = { peek = null; mode = Mode.Collapsed },
+                    )
                     is IslandEvent.Notification -> NotificationCard(
                         p, pillH,
+                        more = stack.size - 1,
+                        onViewAll = { tab = 3; peek = null; stack.clear(); mode = Mode.Expanded },
                         onReply = { p.chat?.let { Island.openChat = it } },
                         onOpen = {
                             ctx.packageManager.getLaunchIntentForPackage(p.pkg)?.let {
@@ -219,14 +275,14 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
                         onDismiss = { peek = null; mode = Mode.Collapsed },
                     )
                     is IslandEvent.Charge -> ChargeCard(p, pillH)
-                    else -> Collapsed(geo, pillH, camGap, media, accent, null)
+                    else -> Collapsed(geo, pillH, camGap, media, accent, null, null)
                 }
-                Mode.Expanded -> Expanded(pillH, media, accent, tab, { tab = it; lastTouch = SystemClock.elapsedRealtime() }) { lastTouch = SystemClock.elapsedRealtime() }
+                Mode.Expanded -> Expanded(pillH, media, accent, tab, { tab = it; lastTouch = SystemClock.elapsedRealtime() }, { mode = Mode.Collapsed }) { lastTouch = SystemClock.elapsedRealtime() }
                 Mode.Intro -> Unit
             }
         }
         androidx.compose.animation.AnimatedVisibility(
-            visible = bubble != null && mode == Mode.Collapsed,
+            visible = bubble != null && mode == Mode.Collapsed && !playing,   // the eyes step aside while music plays
             enter = fadeIn(tween(160)) + scaleIn(spring(0.5f, 500f), initialScale = 0.5f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)),
             exit = fadeOut(tween(180)) + androidx.compose.animation.scaleOut(targetScale = 0.85f),
         ) {
@@ -279,17 +335,29 @@ private fun DropletIntro(pillH: Float, done: () -> Unit) {
 //  Collapsed pill: eyes | camera hole | battery  (artwork + equalizer while playing)
 // =====================================================================================
 @Composable
-private fun Collapsed(geo: Geo, pillH: Float, camGap: Float, media: MediaInfo?, accent: Color, volume: IslandEvent.Volume?) {
-    Row(Modifier.fillMaxSize().padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun Collapsed(geo: Geo, pillH: Float, camGap: Float, media: MediaInfo?, accent: Color, volume: IslandEvent.Volume?, lyric: String?) {
+    val playing = media?.playing == true
+    var clock by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { while (true) { clock = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); delay(5000) } }
+    // while music plays the pill is about the song: the eyes step aside, lyrics run underneath
+    val eyesA by androidx.compose.animation.core.animateFloatAsState(if (playing || volume != null) 0f else 1f, tween(260), label = "eyesA")
+  Column(Modifier.fillMaxSize()) {
+    Row(Modifier.fillMaxWidth().height(pillH.dp).padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             when {
                 volume != null -> Icon(when { volume.muted -> Ico.VolumeOff; volume.level < 0.5f -> Ico.VolumeDown; else -> Ico.VolumeUp }, Fg, 17f)
-                media?.art != null && media.playing -> Image(media.art, null, Modifier.size((pillH - 10).dp).clip(RoundedCornerShape(7.dp)), contentScale = ContentScale.Crop)
-                geo.hasCutout -> Eyes(eyeSize = (pillH * 0.42f).dp, gap = 5.dp, iris = accent)
+                media?.art != null && playing -> Image(media.art, null, Modifier.size((pillH - 10).dp).clip(RoundedCornerShape(7.dp)), contentScale = ContentScale.Crop)
+                playing -> Icon(Ico.Music, accent, 15f)
+                else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text2(clock, 12f, Fg, Modifier.padding(start = 3.dp), weight = FontWeight.SemiBold)
+                    if (geo.hasCutout && eyesA > 0.01f) Box(Modifier.padding(start = 7.dp).graphicsLayer { alpha = eyesA }) {
+                        Eyes(eyeSize = (pillH * 0.38f).dp, gap = 4.dp, iris = accent)
+                    }
+                }
             }
         }
         Box(Modifier.width(camGap.dp), contentAlignment = Alignment.Center) {
-            if (!geo.hasCutout && volume == null) Eyes(eyeSize = (pillH * 0.42f).dp, gap = 6.dp, iris = accent)
+            if (!geo.hasCutout && eyesA > 0.01f) Box(Modifier.graphicsLayer { alpha = eyesA }) { Eyes(eyeSize = (pillH * 0.42f).dp, gap = 6.dp, iris = accent) }
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             when {
@@ -297,22 +365,32 @@ private fun Collapsed(geo: Geo, pillH: Float, camGap: Float, media: MediaInfo?, 
                     LevelBar(volume.level, accent, 64f)
                     Text2("${(volume.level * 100).toInt()}", 11.5f, FgDim, Modifier.padding(start = 7.dp).width(24.dp), align = TextAlign.End)
                 }
-                media?.playing == true -> Equalizer(accent, true, pillH * 0.48f)
+                playing -> Equalizer(accent, true, pillH * 0.48f)
                 else -> Battery(Island.battery, Island.charging)
             }
         }
     }
+    // karaoke line under the pill
+    if (lyric != null) AnimatedContent(lyric, transitionSpec = {
+        (fadeIn(tween(260)) + androidx.compose.animation.slideInVertically { it / 2 }) togetherWith fadeOut(tween(120))
+    }, label = "pillLyric", modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) { line ->
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Text2("♪", 11f, accent, Modifier.padding(end = 6.dp), weight = FontWeight.Bold)
+            Text2(line, 12f, lerpC(Color.White, accent, 0.25f), weight = FontWeight.SemiBold)
+        }
+    }
+  }
 }
 
 // =====================================================================================
 //  Peek cards
 // =====================================================================================
 @Composable
-private fun NotificationCard(n: IslandEvent.Notification, pillH: Float, onReply: () -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit) {
+private fun NotificationCard(n: IslandEvent.Notification, pillH: Float, more: Int, onViewAll: () -> Unit, onReply: () -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit) {
     // tint everything with the app's own colour
     val tint = remember(n) { n.icon?.let { runCatching { com.windowsnotch.island.Colors.accentOf(it.asAndroidBitmap()) }.getOrNull() } ?: Green }
     val left = remember(n) { Animatable(1f) }
-    LaunchedEffect(n) { left.animateTo(0f, tween(4800, easing = LinearEasing)) }
+    LaunchedEffect(n) { left.animateTo(0f, tween(if (more > 0) 6500 else 4800, easing = LinearEasing)) }
     val iconPop = remember(n) { Animatable(0.4f) }
     LaunchedEffect(n) { iconPop.animateTo(1f, spring(0.42f, 380f)) }
 
@@ -334,6 +412,12 @@ private fun NotificationCard(n: IslandEvent.Notification, pillH: Float, onReply:
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text2(n.app, 11f, lerpC(tint, Color.White, 0.25f), weight = FontWeight.SemiBold)
                         Text2("  ·  now", 11f, FgFaint)
+                        if (more > 0) {
+                            Spacer(Modifier.weight(1f))
+                            Box(Modifier.clip(RoundedCornerShape(9.dp)).background(Color(0x2EFFFFFF)).clickable(onClick = onViewAll).padding(horizontal = 8.dp, vertical = 2.dp)) {
+                                Text2("View all · ${more + 1}", 10.5f, Fg, weight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                     Text2(n.title.ifBlank { n.app }, 14.5f, Fg, weight = FontWeight.SemiBold)
                     if (n.text.isNotBlank()) androidx.compose.material3.Text(
@@ -362,6 +446,52 @@ private fun Chip(label: String, onClick: () -> Unit) =
     Box(Modifier.clip(RoundedCornerShape(11.dp)).background(Color(0x26FFFFFF)).clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 5.dp)) {
         Text2(label, 11.5f, Fg, weight = FontWeight.SemiBold)
     }
+
+private val Orange = Color(0xFFFF9F0A)
+
+/** A to-do reminder: ✓ Done or Snooze 10 min; stays 20 s. */
+@Composable
+private fun ReminderCard(item: com.windowsnotch.island.TodoItem, pillH: Float, onDone: () -> Unit, onSnooze: () -> Unit, onDismiss: () -> Unit) {
+    val left = remember(item) { Animatable(1f) }
+    LaunchedEffect(item) { left.animateTo(0f, tween(20_000, easing = LinearEasing)) }
+    val ring = rememberInfiniteTransition(label = "ring")
+    val wobble by ring.animateFloat(-14f, 14f, infiniteRepeatable(tween(90, easing = LinearEasing), RepeatMode.Reverse), label = "wobble")
+    val pause by ring.animateFloat(0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "pause")
+    Box(Modifier.fillMaxSize()) {
+        Canvas(Modifier.size(150.dp).offset((-40).dp, (pillH - 50).dp)) {
+            drawCircle(Brush.radialGradient(listOf(Orange.copy(alpha = 0.38f), Color.Transparent)))
+        }
+        Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 10.dp, top = (pillH - 2).dp, bottom = 10.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Orange.copy(alpha = 0.2f)).border(1.dp, Orange.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // the alarm clock rings in short bursts
+                    Box(Modifier.graphicsLayer { rotationZ = if (pause < 0.35f) wobble else 0f }) { Icon(Ico.Alarm, Orange, 22f) }
+                }
+                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text2("REMINDER", 11f, lerpC(Orange, Color.White, 0.2f), weight = FontWeight.SemiBold)
+                        Text2("  ·  now", 11f, FgFaint)
+                    }
+                    Text2(item.text, 14.5f, Fg, weight = FontWeight.SemiBold)
+                    val at = item.due?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it)) } ?: ""
+                    Text2("Due $at  ·  from your to-do list", 12.5f, FgDim)
+                }
+                Box(Modifier.size(28.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) { Text2("✕", 12f, FgDim) }
+            }
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.padding(start = 56.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Chip("✓  Done", onDone)
+                Chip("Snooze 10 min", onSnooze)
+            }
+        }
+        Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp, vertical = 6.dp).fillMaxWidth().height(2.5.dp).clip(CircleShape).background(Color(0x12FFFFFF))) {
+            Box(Modifier.fillMaxWidth(left.value).height(2.5.dp).clip(CircleShape).background(Orange))
+        }
+    }
+}
 
 @Composable
 private fun SpeechBubble(text: String) {
@@ -432,21 +562,26 @@ private fun ChargeCard(c: IslandEvent.Charge, pillH: Float) {
 //  Expanded: media (artwork, progress, controls, karaoke lyrics) or a friendly idle face
 // =====================================================================================
 @Composable
-private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, setTab: (Int) -> Unit, touched: () -> Unit) {
+private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, setTab: (Int) -> Unit, close: () -> Unit, touched: () -> Unit) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(200) } }
 
     Column(Modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = (pillH + 2).dp, bottom = 14.dp)) {
-        // Media · Chats · Search
-        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Media · Chats · Search · Alerts · To-do
+        Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TabPill(Ico.Music, "Media", tab == 0) { setTab(0) }
             TabPill(Ico.Chat, "Chats", tab == 1, badge = Island.chats.any { it.unread > 0 }) { setTab(1) }
             TabPill(Ico.Search, "Search", tab == 2) { setTab(2) }
+            TabPill(Ico.Bell, "Alerts", tab == 3, badge = Island.unseenAlerts, badgeColor = Color(0xFFFF453A)) { setTab(3) }
+            TabPill(Ico.Todo, "To-do", tab == 4, badge = com.windowsnotch.island.Todo.items.any { it.overdue() || (it.due != null && !it.done && it.due!! - System.currentTimeMillis() < 3600_000) },
+                badgeColor = Color(0xFFFFB020)) { setTab(4) }
         }
         AnimatedContent(tab, transitionSpec = { (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f)) togetherWith fadeOut(tween(120)) }, label = "tab") { t ->
             when (t) {
                 1 -> ChatsPanel(touched)
                 2 -> SearchPanel(touched) { setTab(0) }
+                3 -> AlertsPanel(touched, close)
+                4 -> TodoPanel(touched)
                 else -> AnimatedContent(media == null, transitionSpec = { (fadeIn(tween(250)) + scaleIn(initialScale = 0.96f)) togetherWith fadeOut(tween(150)) }, label = "exp") { idle ->
                     if (idle) IdlePanel() else media?.let { MediaPanel(it, accent, now, touched) }
                 }
@@ -456,16 +591,16 @@ private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, s
 }
 
 @Composable
-private fun TabPill(icon: ImageVector, label: String, selected: Boolean, badge: Boolean = false, onClick: () -> Unit) {
+private fun TabPill(icon: ImageVector, label: String, selected: Boolean, badge: Boolean = false, badgeColor: Color = Green, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(12.dp)).background(if (selected) Glass else Color.Transparent)
             .border(1.dp, if (selected) GlassStroke else Color.Transparent, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 6.dp),
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box {
             Icon(icon, if (selected) Fg else FgFaint, 15f)
-            if (badge) Box(Modifier.align(Alignment.TopEnd).size(6.dp).clip(CircleShape).background(Green))
+            if (badge) Box(Modifier.align(Alignment.TopEnd).size(6.dp).clip(CircleShape).background(badgeColor))
         }
         if (selected) Text2(label, 12f, Fg, Modifier.padding(start = 6.dp), weight = FontWeight.SemiBold)
     }
@@ -672,6 +807,192 @@ private fun InputRow(value: String, onChange: (String) -> Unit, hint: String, ac
     }
 }
 
+// =====================================================================================
+//  Alerts: every notification, unfolding out of a stack like an iPhone's "View all"
+// =====================================================================================
+private fun ago(t: Long, now: Long): String {
+    val s = (now - t) / 1000
+    return when {
+        s < 60 -> "now"
+        s < 3600 -> "${s / 60}m ago"
+        s < 86400 -> "${s / 3600}h ago"
+        else -> SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(Date(t))
+    }
+}
+
+@Composable
+private fun AlertsPanel(touched: () -> Unit, close: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val list = Island.history
+    var clearing by remember { mutableStateOf(false) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { Island.unseenAlerts = false; while (true) { now = System.currentTimeMillis(); delay(20_000) } }
+    LaunchedEffect(clearing) { if (clearing) { delay(260L + minOf(list.size, 8) * 40L); list.clear(); clearing = false } }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text2(if (list.isEmpty()) "Notifications" else "${list.size} notification${if (list.size == 1) "" else "s"}", 12.5f, Fg, Modifier.weight(1f), weight = FontWeight.SemiBold)
+            if (list.isNotEmpty()) Chip("Clear all") { touched(); clearing = true }
+        }
+        if (list.isEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(top = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(46.dp).clip(CircleShape).background(Glass), contentAlignment = Alignment.Center) { Icon(Ico.Bell, Fg, 20f) }
+                Text2("You're all caught up", 14.5f, Fg, Modifier.padding(top = 10.dp), weight = FontWeight.SemiBold)
+                Text2("Notifications you get will be kept here", 11.5f, FgDim)
+            }
+            return@Column
+        }
+        androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(list.size, key = { System.identityHashCode(list[it]) }) { i ->
+                val e = list[i]
+                // starts tucked under the card above it, then springs down into place (staggered)
+                val y = remember { Animatable(if (i < 8) -i * 66f else 0f) }
+                val a = remember { Animatable(if (i < 3) 1f else 0f) }
+                val s = remember { Animatable(if (i < 8) 1f - minOf(i, 3) * 0.04f else 1f) }
+                LaunchedEffect(Unit) {
+                    delay(60L + minOf(i, 8) * 55L)
+                    launch { y.animateTo(0f, spring(0.62f, 230f)) }
+                    launch { s.animateTo(1f, spring(0.7f, 260f)) }
+                    a.animateTo(1f, tween(280))
+                }
+                val out by androidx.compose.animation.core.animateFloatAsState(if (clearing) 460f else 0f,
+                    tween(280, delayMillis = minOf(i, 8) * 40, easing = EaseInCubic), label = "out")
+                Row(
+                    Modifier.zIndex(100f - i).graphicsLayer {
+                        translationY = y.value * density; translationX = out * density
+                        alpha = a.value; scaleX = s.value
+                    }.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(Color(0x14FFFFFF))
+                        .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(15.dp))
+                        .clickable {
+                            touched()
+                            val chat = e.n.chat
+                            if (chat != null) { chat.unread = 0; Island.openChat = chat }
+                            else ctx.packageManager.getLaunchIntentForPackage(e.n.pkg)?.let {
+                                it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK); runCatching { ctx.startActivity(it) }; close()
+                            }
+                        }.padding(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x24FFFFFF)), contentAlignment = Alignment.Center) {
+                        if (e.n.icon != null) Image(e.n.icon, null, Modifier.size(22.dp)) else Icon(Ico.Bell, Fg, 15f)
+                    }
+                    Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                        Row {
+                            Text2(e.n.app.uppercase(), 10.5f, Color(0x99F5F5F7), Modifier.weight(1f), weight = FontWeight.SemiBold)
+                            Text2(ago(e.time, now), 10f, FgFaint)
+                        }
+                        Text2(e.n.title.ifBlank { e.n.app }, 13f, Fg, weight = FontWeight.SemiBold)
+                        if (e.n.text.isNotBlank()) androidx.compose.material3.Text(e.n.text, color = FgDim, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =====================================================================================
+//  To-do with reminders: "call mom at 5pm", "stretch in 20 min", "pay rent tomorrow"
+// =====================================================================================
+private object TodoState {
+    var q by mutableStateOf("")
+    var chipDue by mutableStateOf<Long?>(null)
+}
+
+@Composable
+private fun TodoPanel(touched: () -> Unit) {
+    val s = TodoState
+    val todo = com.windowsnotch.island.Todo
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(15_000) } }
+    val parsed = remember(s.q) { todo.parse(s.q) }
+    val due = parsed.second ?: s.chipDue
+    val add = {
+        val (text, d) = todo.parse(s.q)
+        if (text.isNotEmpty()) {
+            touched()
+            todo.add(text, d ?: s.chipDue)
+            s.q = ""; s.chipDue = null
+            Island.react(EyeMood.Happy, 1200)
+        }
+    }
+    Column(Modifier.fillMaxSize()) {
+        InputRow(s.q, { s.q = it; touched() }, "Add a task… try “call mom at 5pm”", Ico.Add) { add() }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (due != null) Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x33FFB020)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Text2("⏰ " + com.windowsnotch.island.TodoItem("", "", false, due, false, 0).dueText(now), 11f, Color(0xFFFFC85A), weight = FontWeight.SemiBold)
+            }
+            @Composable fun chip(label: String, ms: () -> Long?) = Box(
+                Modifier.clip(RoundedCornerShape(11.dp)).background(Color(0x1FFFFFFF)).clickable { touched(); s.chipDue = ms() }.padding(horizontal = 10.dp, vertical = 4.dp),
+            ) { Text2(label, 11f, Fg) }
+            chip("+15 min") { System.currentTimeMillis() + 15 * 60_000L }
+            chip("+1 hour") { System.currentTimeMillis() + 3600_000L }
+            chip("Tonight") {
+                val c = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 20); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }
+                if (c.timeInMillis > System.currentTimeMillis()) c.timeInMillis else System.currentTimeMillis() + 30 * 60_000L
+            }
+            chip("Tomorrow 9:00") {
+                java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, 1); set(java.util.Calendar.HOUR_OF_DAY, 9); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
+            }
+            chip("No reminder") { null }
+        }
+        if (todo.items.isEmpty()) {
+            Column(Modifier.fillMaxWidth().padding(top = 26.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text2("✨ Nothing to do", 14.5f, Fg, weight = FontWeight.SemiBold)
+                Text2("Add a task above — the island reminds you when it's time", 11.5f, FgDim)
+            }
+            return@Column
+        }
+        androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            items(todo.items.size, key = { todo.items[it].id }) { i ->
+                val t = todo.items[i]
+                val pop = remember { Animatable(1f) }
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                Row(
+                    Modifier.animateItem().fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0x0FFFFFFF))
+                        .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // round check
+                    Box(
+                        Modifier.size(22.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }.clip(CircleShape)
+                            .background(if (t.done) Green else Color.Transparent).border(1.6.dp, if (t.done) Green else Color(0x66FFFFFF), CircleShape)
+                            .clickable {
+                                touched()
+                                scope.launch { pop.snapTo(0.6f); pop.animateTo(1f, spring(0.35f, 500f)) }
+                                val finishing = !t.done
+                                t.done = !t.done
+                                if (finishing) Island.react(EyeMood.Happy, 1200)
+                                scope.launch { delay(if (finishing) 380 else 0); todo.sort(); todo.save() }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { if (t.done) Icon(Ico.Check, Color.Black, 14f) }
+                    androidx.compose.material3.Text(
+                        t.text, Modifier.padding(start = 11.dp, end = 8.dp).weight(1f).graphicsLayer { alpha = if (t.done) 0.45f else 1f },
+                        color = Fg, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        textDecoration = if (t.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                    )
+                    if (t.due != null && !t.done) {
+                        val over = t.overdue(now)
+                        val soon = !over && t.due!! - now < 3600_000
+                        val col = when { over -> Color(0xFFFF5A4F); soon -> Color(0xFFFFB020); else -> FgDim }
+                        Row(Modifier.clip(RoundedCornerShape(9.dp)).background(if (over) Color(0x26FF453A) else Color(0x1AFFFFFF)).padding(horizontal = 7.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Ico.Alarm, col, 10f)
+                            Text2(t.dueText(now), 10.5f, col, Modifier.padding(start = 4.dp), weight = FontWeight.SemiBold)
+                        }
+                    }
+                    Box(Modifier.padding(start = 4.dp).size(26.dp).clip(CircleShape).clickable { touched(); todo.remove(t) }, contentAlignment = Alignment.Center) {
+                        Icon(Ico.Close, FgFaint, 12f)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun IdlePanel() {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -774,7 +1095,7 @@ private fun Battery(pct: Int, charging: Boolean) {
     val low = !charging && pct <= 20
     val color = when { charging -> Green; low -> Color(0xFFFF453A); pct <= 35 -> Color(0xFFFFB020); else -> Color.White }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text2("$pct", 11f, if (charging) Color(0xFF5EE082) else if (low) Color(0xFFFF5A4F) else FgDim, weight = FontWeight.SemiBold)
+        Text2("$pct%", 11f, if (charging) Color(0xFF5EE082) else if (low) Color(0xFFFF5A4F) else FgDim, weight = FontWeight.SemiBold)
         Canvas(Modifier.padding(start = 4.dp).size(24.dp, 12.dp)) {
             val d = density
             drawRoundRect(Color.White.copy(alpha = 0.55f), Offset(0f, 0f), Size(21 * d, 12 * d), CornerRadius(3.6f * d), style = Stroke(1.1f * d))

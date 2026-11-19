@@ -52,7 +52,12 @@ sealed interface IslandEvent {
     data class Notification(val app: String, val title: String, val text: String, val icon: ImageBitmap?, val chat: ChatThread? = null, val pkg: String = "") : IslandEvent
     data class Charge(val charging: Boolean, val percent: Int) : IslandEvent
     data class Volume(val level: Float, val muted: Boolean) : IslandEvent
+    /** A to-do whose reminder time has come. */
+    data class Reminder(val item: TodoItem) : IslandEvent
 }
+
+/** A notification kept for the Alerts tab. */
+class NotifEntry(val n: IslandEvent.Notification, val time: Long = System.currentTimeMillis())
 
 /** Shared, observable state between the services and the island UI (all on the main thread). */
 object Island {
@@ -98,7 +103,16 @@ object Island {
     /** True while a text field in the island has focus → the overlay must accept the keyboard. */
     var typing by mutableStateOf(false)
 
+    /** Every notification (newest first, last 60) for the Alerts tab, and whether some are unseen. */
+    val history = mutableStateListOf<NotifEntry>()
+    var unseenAlerts by mutableStateOf(false)
+
     fun post(e: IslandEvent) {
+        if (e is IslandEvent.Notification) {
+            history.add(0, NotifEntry(e))
+            while (history.size > 60) history.removeAt(history.size - 1)
+            unseenAlerts = true
+        }
         event = e
         eventId++
     }

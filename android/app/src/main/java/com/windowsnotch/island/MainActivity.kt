@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Todo.init(this)
         enableEdgeToEdge()
         val prefs = getSharedPreferences("island", MODE_PRIVATE)
         Island.lyricsEnabled = prefs.getBoolean("lyrics", true)

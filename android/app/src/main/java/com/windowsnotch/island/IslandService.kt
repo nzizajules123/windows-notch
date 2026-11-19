@@ -63,6 +63,19 @@ class IslandService : AccessibilityService() {
         Island.talk = getSharedPreferences("island", MODE_PRIVATE).getBoolean("talk", true)
         android.os.Handler(mainLooper).postDelayed({ Island.say(Island.greeting()) }, 3600)   // after the droplet intro
         owner.start()
+        Todo.init(this)
+        // to-do reminders: checked every 15 s; anything that came due while the island was off fires on start
+        owner.lifecycleScope.launch {
+            kotlinx.coroutines.delay(4000)   // after the droplet intro
+            while (true) {
+                Todo.dueNow().forEach {
+                    Island.post(IslandEvent.Reminder(it))
+                    Island.react(EyeMood.Surprised, 900)
+                    kotlinx.coroutines.delay(400)
+                }
+                kotlinx.coroutines.delay(15_000)
+            }
+        }
         addOverlay()
         registerReceivers()
         Island.overlayRunning = true

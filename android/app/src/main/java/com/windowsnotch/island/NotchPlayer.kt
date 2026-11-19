@@ -161,9 +161,19 @@ object NotchPlayer {
 
     // ------------------------------------------------------------------ search (no API key)
     /** YouTube results from the public search page (personal use; may need updating if YouTube changes it). */
-    fun search(q: String, max: Int = 12): List<YtVideo> = runCatching {
-        val c = URL("https://www.youtube.com/results?search_query=" + URLEncoder.encode(q, "UTF-8") + "&sp=EgIQAQ%253D%253D")
-            .openConnection() as HttpURLConnection
+    fun search(q: String, max: Int = 12): List<YtVideo> {
+        val enc = URLEncoder.encode(q, "UTF-8")
+        // "videos only" filter first; if YouTube serves a page we can't read, try the plain results page
+        for (url in listOf("https://www.youtube.com/results?search_query=$enc&sp=EgIQAQ%253D%253D", "https://www.youtube.com/results?search_query=$enc"))
+            repeat(2) {
+                val r = fetchResults(url, max)
+                if (r.isNotEmpty()) return r
+            }
+        return emptyList()
+    }
+
+    private fun fetchResults(url: String, max: Int): List<YtVideo> = runCatching {
+        val c = URL(url).openConnection() as HttpURLConnection
         c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")
         c.setRequestProperty("Accept-Language", "en-US,en;q=0.8")
         c.connectTimeout = 8000; c.readTimeout = 10000
@@ -185,7 +195,7 @@ object NotchPlayer {
                 val v = e.optJSONObject("videoRenderer")
                 if (v != null && v.has("videoId")) {
                     val id = v.optString("videoId")
-                    val len = v.optJSONObject("lengthText")?.optString("simpleText").orEmpty()
+                    val len = lengthOf(v)
                     if (len.isNotEmpty() && out.none { it.id == id })
                         out.add(YtVideo(id, runs(v, "title"), runs(v, "ownerText").ifEmpty { runs(v, "longBylineText") }, len))
                     return
@@ -195,6 +205,19 @@ object NotchPlayer {
             }
             is JSONArray -> for (i in 0 until e.length()) walk(e.opt(i), out, max)
         }
+    }
+
+    /** Video length: "lengthText", else the time badge on the thumbnail. "LIVE" / none → live stream (skipped). */
+    private fun lengthOf(v: JSONObject): String {
+        runs(v, "lengthText").takeIf { it.isNotEmpty() }?.let { return it }
+        val ov = v.optJSONArray("thumbnailOverlays") ?: return ""
+        for (i in 0 until ov.length()) {
+            val ts = ov.optJSONObject(i)?.optJSONObject("thumbnailOverlayTimeStatusRenderer") ?: continue
+            if (ts.optString("style") == "LIVE") return ""
+            val txt = runs(ts, "text")
+            if (txt.isNotEmpty() && txt[0].isDigit()) return txt
+        }
+        return ""
     }
 
     private fun runs(v: JSONObject, prop: String): String {
