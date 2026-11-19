@@ -179,6 +179,15 @@ from your browser or file manager when asked). Then open **Notch Island** and:
 
 Tap the island to open it, tap outside to close it. Tap the big eyes in the open view to poke them, or double-tap them to wink.
 
+The small pill shows the time, the eyes and battery %, on smoked glass tinted with the colour of what's playing. While
+music plays the eyes step aside for the artwork and equaliser, and the current lyric line runs under the pill.
+
+- **Alerts**: every notification is kept here. When several arrive together the pop-up shows **View all · N**; tap it
+  and the stack unfolds into a list, card by card, like on an iPhone. **Clear all** swipes them away.
+- **To-do**: type tasks in plain words ("call mom at 5pm", "stretch in 20 min", "pay rent tomorrow") or tap a quick
+  time. When one is due, the eyes jump and a ringing reminder drops from the island with **Done** and **Snooze 10 min**.
+- **Search**: YouTube songs play right inside the island.
+
 Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` then `gradlew assembleRelease`.
 
 ## Build from source
