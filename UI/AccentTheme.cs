@@ -13,7 +13,7 @@ public sealed class AccentTheme
     public static readonly Color Default = System.Windows.Media.Color.FromRgb(0x30, 0xD1, 0x58);
 
     private readonly SolidColorBrush _solid, _soft, _faint;
-    private readonly GradientStop _vTop, _vBottom, _hLeft, _hRight, _lineMid, _ambTop;
+    private readonly GradientStop _vTop, _vBottom, _hLeft, _hRight, _lineMid, _ambTop, _washA, _washB;
     private readonly List<DropShadowEffect> _glows = new();
     public Color Current { get; private set; } = Default;
 
@@ -46,7 +46,13 @@ public sealed class AccentTheme
             Center = new Point(0.25, 0), GradientOrigin = new Point(0.25, 0), RadiusX = 0.9, RadiusY = 1.3,
         };
 
+        // diagonal wash of the artwork colour over the frosted open notch
+        _washA = new GradientStop(WithAlpha(Default, 0x66), 0);
+        _washB = new GradientStop(WithAlpha(Darker(Default, 0.5), 0x33), 0.55);
+        var wash = new LinearGradientBrush(new GradientStopCollection { _washA, _washB, new(Colors.Transparent, 1) }, new Point(0, 0), new Point(1, 1));
+
         var r = target;
+        r["AccentWash"] = wash;
         r["Accent"] = _solid;
         r["AccentSoft"] = _soft;
         r["AccentFaint"] = _faint;
@@ -78,8 +84,12 @@ public sealed class AccentTheme
         Motion.Color(_hRight, GradientStop.ColorProperty, Lighter(c, 0.12), ms);
         Motion.Color(_lineMid, GradientStop.ColorProperty, c, ms);
         Motion.Color(_ambTop, GradientStop.ColorProperty, WithAlpha(c, 0x55), ms);
+        Motion.Color(_washA, GradientStop.ColorProperty, WithAlpha(c, 0x66), ms);
+        Motion.Color(_washB, GradientStop.ColorProperty, WithAlpha(Darker(c, 0.5), 0x33), ms);
         foreach (var g in _glows) Motion.Color(g, DropShadowEffect.ColorProperty, c, ms);
     }
+
+    public static Color Darker(Color c, double t) => System.Windows.Media.Color.FromRgb((byte)(c.R * (1 - t)), (byte)(c.G * (1 - t)), (byte)(c.B * (1 - t)));
 
     public static Color WithAlpha(Color c, byte a) => System.Windows.Media.Color.FromArgb(a, c.R, c.G, c.B);
 

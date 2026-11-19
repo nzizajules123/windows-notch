@@ -13,6 +13,8 @@ public sealed class Settings
     public bool ShowCameraPreview { get; set; } = true;
     /// <summary>The eyes say hi, react with little speech bubbles and give the odd gentle nudge.</summary>
     public bool EyesTalk { get; set; } = true;
+    /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
+    public int StandbyAfterMinutes { get; set; } = 5;
     /// <summary>Experimental Windows blur behind the island (off: some Windows builds draw it as a square box).</summary>
     public bool SystemBlur { get; set; } = false;
     /// <summary>"auto" (Python if installed, else built-in), "python" or "web".</summary>

@@ -153,7 +153,9 @@ public sealed class ActivityService
     private static readonly HashSet<string> Shells = new(StringComparer.OrdinalIgnoreCase)
         { "powershell.exe", "pwsh.exe", "cmd.exe", "bash.exe", "wsl.exe", "zsh.exe", "nu.exe", "sh.exe" };
     private static readonly HashSet<string> Ignore = new(StringComparer.OrdinalIgnoreCase)
-        { "conhost.exe", "OpenConsole.exe", "ssh-agent.exe", "WindowsNotch.exe", "rtk.exe", "more.com", "less.exe" };
+        { "conhost.exe", "OpenConsole.exe", "ssh-agent.exe", "WindowsNotch.exe", "rtk.exe", "more.com", "less.exe", "chrome-native-host.exe" };
+    private static readonly HashSet<string> Browsers = new(StringComparer.OrdinalIgnoreCase)
+        { "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "arc.exe" };
     private static readonly (string exe, string owner)[] Owners =
     {
         ("claude.exe", "Claude Code"), ("Code.exe", "VS Code"), ("Antigravity.exe", "Antigravity"), ("Cursor.exe", "Cursor"),
@@ -180,6 +182,8 @@ public sealed class ActivityService
         {
             for (int hops = 0; hops < 12 && procs.TryGetValue(pid, out var p); hops++)
             {
+                // browsers start helpers through a shell (extension "native hosts") — not terminal work
+                if (Browsers.Contains(p.name)) return null;
                 foreach (var (exe, owner) in Owners) if (p.name.Equals(exe, StringComparison.OrdinalIgnoreCase)) return owner;
                 if (p.parent == pid) break;
                 pid = p.parent;
@@ -204,10 +208,14 @@ public sealed class ActivityService
     {
         var c = cmd.Trim();
         if (c.Length == 0) return Path.GetFileNameWithoutExtension(exe);
-        // drop the program's full path: "C:\Program Files\dotnet\dotnet.exe" publish …  →  dotnet publish …
-        var m = Regex.Match(c, "^\"?([^\"]*?\\\\)?([^\\\\\" ]+?)(\\.exe)?\"?(\\s+(.*))?$", RegexOptions.IgnoreCase);
-        var name = m.Success ? m.Groups[2].Value : Path.GetFileNameWithoutExtension(exe);
-        var args = m.Success ? m.Groups[5].Value : "";
+        // split the program from its arguments, even when its path has spaces ("C:\Program Files\nodejs\node.exe" x.js)
+        string first, args;
+        if (c.StartsWith('"') && c.IndexOf('"', 1) is var q and > 0) { first = c[1..q]; args = c[(q + 1)..]; }
+        else if (c.IndexOf(".exe", StringComparison.OrdinalIgnoreCase) is var x and > 0) { first = c[..(x + 4)]; args = c[(x + 4)..]; }
+        else { var sp = c.IndexOf(' '); first = sp > 0 ? c[..sp] : c; args = sp > 0 ? c[sp..] : ""; }
+        var name = Path.GetFileNameWithoutExtension(first.Trim().Trim('"'));
+        if (name.Length == 0) name = Path.GetFileNameWithoutExtension(exe);
+        args = args.Trim();
         args = Regex.Replace(args, "\"?[A-Za-z]:\\\\[^\" ]*\\\\([^\\\\\" ]+)\"?", "$1");   // shorten path arguments to file names
         var s = (name + " " + args).Trim();
         return s.Length > 64 ? s[..63] + "…" : s;

@@ -118,10 +118,17 @@
                     DragEnter="Notch_DragEnter" DragOver="Notch_DragOver" DragLeave="Notch_DragLeave" Drop="Notch_Drop">
                 <Grid x:Name="NotchContent">
 
+                    <!-- ===== frosted glass: a blurred picture of the desktop behind the open notch ===== -->
+                    <Image x:Name="FrostImage" Opacity="0" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" IsHitTestVisible="False">
+                        <Image.Effect><BlurEffect Radius="60" KernelType="Gaussian" RenderingBias="Quality"/></Image.Effect>
+                    </Image>
+
                     <!-- ===== ambient backdrop: blurred, slowly drifting artwork ===== -->
                     <Grid x:Name="Ambient" Opacity="0" IsHitTestVisible="False">
+                        <!-- dark vibrancy over the frosted desktop so text always reads -->
+                        <Rectangle Fill="#A6141418"/>
                         
-                        <Image x:Name="AmbientImage" Stretch="UniformToFill" Opacity="0.28" RenderTransformOrigin="0.5,0.5">
+                        <Image x:Name="AmbientImage" Stretch="UniformToFill" Opacity="0.5" RenderTransformOrigin="0.5,0.5">
                             <Image.RenderTransform>
                                 <TransformGroup>
                                     <ScaleTransform x:Name="AmbientScale" ScaleX="1.4" ScaleY="1.4"/>
@@ -130,7 +137,8 @@
                             </Image.RenderTransform>
                             <Image.Effect><BlurEffect Radius="70" RenderingBias="Performance"/></Image.Effect>
                         </Image>
-                        <Rectangle Fill="#33000000"/>
+                        <Rectangle x:Name="MediaWash" Fill="{DynamicResource AccentWash}"/>
+                        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#14000000" Offset="0"/><GradientStop Color="#59000000" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
                     </Grid>
 
                     <!-- hairline rim -->
@@ -269,73 +277,6 @@
                             <TextBlock x:Name="PeekSub" FontSize="11.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                         </StackPanel>
                         <ui:EqualizerBars x:Name="PeekEq" Grid.Column="2" BarHeight="18" BarWidth="3.5"/>
-                    </Grid>
-
-                    <!-- ===================== NOTIFICATION CARD ===================== -->
-                    <Grid x:Name="NotifView" Opacity="0" Visibility="Collapsed" Background="Transparent" Cursor="Hand"
-                          MouseLeftButtonUp="NotifView_Click">
-                        <!-- soft glow in the app's colour behind the icon -->
-                        <Ellipse Width="150" Height="150" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-46,-52,0,0" IsHitTestVisible="False">
-                            <Ellipse.Fill>
-                                <RadialGradientBrush>
-                                    <GradientStop x:Name="NotifGlowStop" Color="#5530D158" Offset="0"/>
-                                    <GradientStop Color="#0030D158" Offset="1"/>
-                                </RadialGradientBrush>
-                            </Ellipse.Fill>
-                        </Ellipse>
-                        <Grid Margin="14,12,12,14">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="*"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <Grid Grid.RowSpan="2" Width="46" Height="46" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5">
-                                <Grid.RenderTransform><ScaleTransform x:Name="NotifIconScale"/></Grid.RenderTransform>
-                                <Border CornerRadius="14" Background="#1AFFFFFF" BorderBrush="#2BFFFFFF" BorderThickness="1">
-                                    <Grid>
-                                        <TextBlock x:Name="NotifGlyph" Style="{StaticResource Glyph}" Text="&#xEA8F;" FontSize="19"/>
-                                        <Image x:Name="NotifIcon" Width="30" Height="30" RenderOptions.BitmapScalingMode="HighQuality"/>
-                                    </Grid>
-                                </Border>
-                            </Grid>
-                            <StackPanel x:Name="NotifText" Grid.Column="1" Margin="13,0,8,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock x:Name="NotifApp" FontSize="11" FontWeight="SemiBold"/>
-                                    <TextBlock x:Name="NotifWhen" Text="  ·  now" FontSize="11" Foreground="{StaticResource FgFaint}"/>
-                                    <Border x:Name="NotifMore" CornerRadius="7" Background="#26FFFFFF" Padding="6,0" Margin="8,0,0,0" Visibility="Collapsed">
-                                        <TextBlock x:Name="NotifMoreText" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock x:Name="NotifTitle" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                                <TextBlock x:Name="NotifBody" FontSize="12.5" Foreground="{StaticResource FgDim}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
-                                           MaxHeight="34" Margin="0,1,0,0"/>
-                            </StackPanel>
-                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="24" Height="24" VerticalAlignment="Top" Click="NotifDismiss_Click" ToolTip="Dismiss">
-                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}"/>
-                            </Button>
-                            <StackPanel x:Name="NotifActions" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="13,8,0,0">
-                                <Button x:Name="NotifReply" Style="{StaticResource ChipButton}" Click="NotifReply_Click" Margin="0,0,6,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE97A;" FontSize="10" Margin="0,0,5,0"/>
-                                        <TextBlock Text="Reply" FontSize="11" FontWeight="SemiBold"/>
-                                    </StackPanel>
-                                </Button>
-                                <Button x:Name="NotifOpen" Style="{StaticResource ChipButton}" Click="NotifOpen_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE8A7;" FontSize="10" Margin="0,0,5,0"/>
-                                        <TextBlock x:Name="NotifOpenText" Text="Open" FontSize="11" FontWeight="SemiBold"/>
-                                    </StackPanel>
-                                </Button>
-                            </StackPanel>
-                        </Grid>
-                        <!-- time left before it closes (pauses while you hover) -->
-                        <Border x:Name="NotifTimerTrack" Height="2.5" VerticalAlignment="Bottom" Margin="26,0,26,6" CornerRadius="1.25" Background="#12FFFFFF" IsHitTestVisible="False">
-                            <Border x:Name="NotifTimer" HorizontalAlignment="Left" CornerRadius="1.25" Background="#FF30D158"/>
-                        </Border>
                     </Grid>
 
                     <!-- ===================== POWER (charger plugged / unplugged) ===================== -->
@@ -1086,6 +1027,13 @@
                                         <CheckBox x:Name="TalkSwitch" Style="{StaticResource Switch}" Click="TalkSwitch_Click"/>
                                         <TextBlock Text="Eyes talk" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <CheckBox x:Name="StandbySwitch" Style="{StaticResource Switch}" Click="StandbySwitch_Click"
+                                                  ToolTip="Show the big clock after 5 minutes away"/>
+                                        <Button Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="StandbyNow_Click" ToolTip="Show the standby clock now">
+                                            <TextBlock Text="Standby clock" FontSize="11"/>
+                                        </Button>
+                                    </StackPanel>
                                     <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Padding="10,4" Margin="0,6,0,0" Click="Quit_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>
@@ -1143,6 +1091,105 @@
 
             <Path x:Name="EarR" Data="M12,0 L0,0 L0,12 A12,12 0 0 1 12,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
         </StackPanel>
+
+        <!-- ===== macOS-style notification banner: drops out of the notch and floats just below it ===== -->
+        <Grid x:Name="Banner" HorizontalAlignment="Center" VerticalAlignment="Top" Width="372" Margin="0,44,0,0" Visibility="Collapsed"
+              Background="Transparent" Cursor="Hand" MouseLeftButtonUp="Banner_Click" MouseEnter="Banner_MouseEnter" MouseLeave="Banner_MouseLeave">
+            <!-- the droplet that falls out of the notch and blooms into the card -->
+            <Ellipse x:Name="BannerDrop" Width="18" Height="18" Fill="Black" HorizontalAlignment="Center" VerticalAlignment="Top" Opacity="0"
+                     IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5" Stroke="#30FFFFFF" StrokeThickness="0.8">
+                <Ellipse.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="BannerDropScale"/>
+                        <TranslateTransform x:Name="BannerDropY"/>
+                    </TransformGroup>
+                </Ellipse.RenderTransform>
+            </Ellipse>
+            <!-- a card peeking out underneath when more are waiting -->
+            <Border x:Name="BannerStack" Margin="16,0,16,-7" VerticalAlignment="Bottom" Height="22" CornerRadius="0,0,16,16"
+                    Background="#E6222227" BorderBrush="#24FFFFFF" BorderThickness="1,0,1,1" Visibility="Collapsed" IsHitTestVisible="False"/>
+            <Grid x:Name="BannerCard" RenderTransformOrigin="0.5,0" Opacity="0">
+                <Grid.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="BannerScale"/>
+                        <TranslateTransform x:Name="BannerY"/>
+                    </TransformGroup>
+                </Grid.RenderTransform>
+                <Grid.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="9" Direction="270" Opacity="0.42"/></Grid.Effect>
+                <Grid x:Name="BannerGlass">
+                    <!-- frosted: a blurred picture of what's behind the card -->
+                    <Image x:Name="BannerBackdrop" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" IsHitTestVisible="False">
+                        <Image.Effect><BlurEffect Radius="46" KernelType="Gaussian" RenderingBias="Quality"/></Image.Effect>
+                    </Image>
+                    <Rectangle Fill="#9E1B1B1F"/>
+                    <Rectangle IsHitTestVisible="False">
+                        <Rectangle.Fill>
+                            <RadialGradientBrush Center="0.1,0.15" GradientOrigin="0.1,0.15" RadiusX="0.7" RadiusY="1.4">
+                                <GradientStop x:Name="BannerTintStop" Color="#4030D158" Offset="0"/>
+                                <GradientStop Color="#0030D158" Offset="1"/>
+                            </RadialGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                    <Rectangle IsHitTestVisible="False">
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#16FFFFFF" Offset="0"/>
+                                <GradientStop Color="#00FFFFFF" Offset="0.55"/>
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                    <Border x:Name="BannerRim" CornerRadius="20" BorderBrush="#30FFFFFF" BorderThickness="1" IsHitTestVisible="False"/>
+
+                    <Grid Margin="12,11,14,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Width="40" Height="40" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform><ScaleTransform x:Name="BannerIconScale"/></Grid.RenderTransform>
+                            <Border CornerRadius="11" Background="#24FFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1">
+                                <TextBlock x:Name="BannerGlyph" Style="{StaticResource Glyph}" Text="&#xEA8F;" FontSize="17"/>
+                            </Border>
+                            <Image x:Name="BannerIcon" Width="40" Height="40" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        </Grid>
+                        <StackPanel x:Name="BannerText" Grid.Column="1" Margin="11,0,0,0">
+                            <Grid>
+                                <TextBlock x:Name="BannerApp" FontSize="11" FontWeight="SemiBold" Foreground="#B3F5F5F7" TextTrimming="CharacterEllipsis" Margin="0,0,52,0"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Border x:Name="BannerMore" CornerRadius="7" Background="#2EFFFFFF" Padding="6,0" Margin="0,0,6,0" Visibility="Collapsed">
+                                        <TextBlock x:Name="BannerMoreText" FontSize="9.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Text="now" FontSize="10.5" Foreground="{StaticResource FgFaint}"/>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock x:Name="BannerTitle" FontSize="13.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="BannerBody" FontSize="12.5" Foreground="#D9F5F5F7" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="34" Margin="0,1,0,0"/>
+                        </StackPanel>
+                        <!-- actions slide in on hover -->
+                        <StackPanel x:Name="BannerActions" Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="11,0,0,0" Height="0" Opacity="0">
+                            <Button x:Name="BannerReply" Style="{StaticResource ChipButton}" Click="BannerReply_Click" Margin="0,8,6,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE97A;" FontSize="10" Margin="0,0,5,0"/>
+                                    <TextBlock Text="Reply" FontSize="11" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource ChipButton}" Click="BannerOpen_Click" Margin="0,8,0,0">
+                                <TextBlock x:Name="BannerOpenText" Text="Open" FontSize="11" FontWeight="SemiBold"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+                <!-- macOS-style close button, top-left corner, on hover -->
+                <Border x:Name="BannerClose" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-6,-6,0,0"
+                        Background="#F23A3A40" BorderBrush="#40FFFFFF" BorderThickness="1" Opacity="0" MouseLeftButtonUp="BannerClose_Click">
+                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="8" Foreground="{StaticResource Fg}"/>
+                </Border>
+            </Grid>
+        </Grid>
 
         <!-- the eyes' speech bubble (pops out under the pill) -->
         <Grid x:Name="Bubble" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,38,0,0" Visibility="Collapsed"

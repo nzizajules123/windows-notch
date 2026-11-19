@@ -108,6 +108,15 @@ public partial class NotchWindow : Window
         new PropertyMetadata(CollapsedRadius, (d, _) => ((NotchWindow)d).ApplyShape()));
     public double NotchRadius { get => (double)GetValue(NotchRadiusProperty); set => SetValue(NotchRadiusProperty, value); }
 
+    // top corners: square while the island hugs the screen edge, rounded once it floats free (open)
+    public static readonly DependencyProperty NotchTopRadiusProperty = DependencyProperty.Register(
+        nameof(NotchTopRadius), typeof(double), typeof(NotchWindow),
+        new PropertyMetadata(0.0, (d, _) => ((NotchWindow)d).ApplyShape()));
+    public double NotchTopRadius { get => (double)GetValue(NotchTopRadiusProperty); set => SetValue(NotchTopRadiusProperty, value); }
+
+    private readonly TranslateTransform _hostY = new();
+    private const double FloatGap = 10;     // how far the open island drops away from the top edge
+
     public NotchWindow()
     {
         InitializeComponent();
@@ -117,6 +126,9 @@ public partial class NotchWindow : Window
             _theme.RegisterGlow(fx);
         _hudTimer.Tick += (_, _) => { _hudTimer.Stop(); HideHud(); };
         Notch.Background = _glass;
+        NotchHost.RenderTransform = _hostY;
+        NotchShadow.RenderTransform = _hostY;
+        NotchGlow.RenderTransform = _hostY;
         EarL.Fill = _glass;
         EarR.Fill = _glass;
         _theme.Changed += (c, ms) => Eyes.SetIris(c, ms);
@@ -125,6 +137,7 @@ public partial class NotchWindow : Window
         _bubbleTimer.Tick += (_, _) => HideBubble();
         _notifTick.Tick += (_, _) => OnNotifTick();
         TalkSwitch.IsChecked = _settings.EyesTalk;
+        StandbySwitch.IsChecked = _settings.StandbyAfterMinutes > 0;
 
         _kSung.Color = AccentTheme.Lighter(AccentTheme.Default, 0.35);
         _karaoke = new LinearGradientBrush(new GradientStopCollection
@@ -164,8 +177,6 @@ public partial class NotchWindow : Window
             if (!Notch.IsMouseOver) return;
             // hovering / poking the eyes plays with them instead of opening the notch
             if (Eyes.IsMouseOver && _mode == Mode.Collapsed) { _hoverIntent.Start(); return; }
-            // a notification card stays put while you hover it (so its buttons can be clicked); click it to open
-            if (_mode == Mode.Peek && _card == NotifView) return;
             Expand();
         };
         _peekTimer.Tick += (_, _) => { _peekTimer.Stop(); EndPeek(); };
@@ -234,6 +245,17 @@ public partial class NotchWindow : Window
         if (App.SnapshotDir != null) { _clock.Start(); await RunSnapshotsAsync(App.SnapshotDir); return; }
 
         StartSystemSignals();
+
+        // QA hooks: --demo expand | standby  (opens that view a few seconds after start)
+        var args = Environment.GetCommandLineArgs();
+        var demo = Array.IndexOf(args, "--demo");
+        if (demo >= 0 && demo + 1 < args.Length)
+        {
+            var what = args[demo + 1];
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(9) };
+            t.Tick += (_, _) => { t.Stop(); if (what == "expand") Expand(); else if (what == "standby") ShowStandby(); };
+            t.Start();
+        }
 
         // If we start while the PC is already locked, wait for the unlock event instead.
         if (_settings.GesturesEnabled && !Native.IsSessionLocked()) await StartGesturesAsync();
@@ -480,6 +502,13 @@ public partial class NotchWindow : Window
             await Task.Delay(1600); Save("14-live-pill");
             Expand();
             await Task.Delay(600);
+            {
+                var preview = new StandbyWindow(_media).RenderPreview();
+                var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(preview));
+                using var fs = System.IO.File.Create(System.IO.Path.Combine(dir, "15-standby.png"));
+                enc.Save(fs);
+            }
             StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", () => { });
             await Task.Delay(1600); Save("7-countdown");
             CancelCountdown();
@@ -612,6 +641,7 @@ public partial class NotchWindow : Window
         var sub = string.IsNullOrWhiteSpace(body) || body == head ? "" : body;
         var icon = AppIconFor(app);
         var chat = isChat ? _pendingChat : null;
+        _pendingChat = null;   // only set again when you click the banner / Reply
         // let the eyes react first, then open the card
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(480) };
         t.Tick += (_, _) => { t.Stop(); ShowNotif(new NotifData(string.IsNullOrWhiteSpace(app) ? "Notification" : app, head, sub, icon, "\uEA8F", chat)); };
@@ -859,7 +889,7 @@ public partial class NotchWindow : Window
     /// <summary>Shows a little speech bubble under the pill; the eyes glance down at it.</summary>
     private void Say(string text, int ms = 2600)
     {
-        if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro) return;
+        if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro || _bannerOpen || _standby != null) return;
         BubbleText.Text = text;
         Bubble.Margin = new Thickness(0, Notch.ActualHeight + 3, 0, 0);
         Bubble.Visibility = Visibility.Visible;
@@ -920,6 +950,55 @@ public partial class NotchWindow : Window
         Say(Pick("Stay hydrated 💧", "You got this 💪", "Time to stretch? 🧘", "Deep breath… 😌", "Nice focus 🔥", "Blink a little 👀", "Proud of you ✨"), 3200);
     }
 
+    // =======================================================================
+    //  Standby clock (macOS lock-screen style) — after a while away, or on demand
+    // =======================================================================
+    private StandbyWindow? _standby;
+
+    private void ShowStandby()
+    {
+        if (_standby != null || App.SnapshotDir != null) return;
+        App.Log("standby: showing");
+        if (Expanded) Collapse();
+        HideBubble();
+        _standby = new StandbyWindow(_media);
+        _standby.Closed += (_, _) =>
+        {
+            _standby = null;
+            SayLater(Pick("Welcome back! 👋", "Hey, you're back 😊", "Missed you 👀"), 600, 2400);
+        };
+        _standby.Show();
+    }
+
+    private void MaybeStandby()
+    {
+        var mins = _settings.StandbyAfterMinutes;
+        if (mins <= 0 || _standby != null || Native.IsSessionLocked()) return;
+        if (Frost.IdleTime() < TimeSpan.FromMinutes(mins)) return;
+        if (IsFullscreenForeground()) return;   // don't cover a video you're watching
+        ShowStandby();
+    }
+
+    private bool IsFullscreenForeground()
+    {
+        var fg = Native.GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == _hwnd || !Native.GetWindowRect(fg, out var r)) return false;
+        var cls = new System.Text.StringBuilder(64);
+        Native.GetClassName(fg, cls, cls.Capacity);
+        if (cls.ToString() is "Progman" or "WorkerW") return false;
+        var mi = new Native.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Native.MONITORINFO>() };
+        return Native.GetMonitorInfo(Native.MonitorFromWindow(fg, 2), ref mi) &&
+               r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+    }
+
+    private void StandbyNow_Click(object sender, RoutedEventArgs e) => ShowStandby();
+
+    private void StandbySwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.StandbyAfterMinutes = StandbySwitch.IsChecked == true ? 5 : 0;
+        _settings.Save();
+    }
+
     private void TalkSwitch_Click(object sender, RoutedEventArgs e)
     {
         _settings.EyesTalk = TalkSwitch.IsChecked == true;
@@ -928,62 +1007,123 @@ public partial class NotchWindow : Window
     }
 
     // =======================================================================
-    //  Notification card: tinted icon, two-line message, actions, countdown, queue
+    //  Notifications: a macOS-style frosted banner that drops out of the notch
     // =======================================================================
     private sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null);
     private readonly List<NotifData> _notifQueue = new();
     private NotifData? _notif;
-    private double _notifTotal, _notifLeft;
-    private readonly DispatcherTimer _notifTick = new() { Interval = TimeSpan.FromMilliseconds(40) };
+    private double _notifLeft;
+    private bool _bannerOpen, _bannerHover;
+    private readonly DispatcherTimer _notifTick = new() { Interval = TimeSpan.FromMilliseconds(50) };
 
     private void ShowNotif(NotifData d)
     {
         if (Expanded || _countdown > 0 || _intro) return;
-        if (_mode == Mode.Peek && _card == NotifView && _notif != null)
+        if (_bannerOpen && _notif != null)
         {
             _notifQueue.Add(d);
-            UpdateNotifMore();
-            Motion.SlideIn(NotifMore, 4, 300);
+            UpdateBannerStack();
             return;
         }
-        PresentNotif(d);
+        PresentBanner(d, fresh: true);
     }
 
-    private void PresentNotif(NotifData d)
+    private void PresentBanner(NotifData d, bool fresh)
     {
-        var same = _mode == Mode.Peek && _card == NotifView;
         _notif = d;
         HideBubble();
-        NotifApp.Text = d.App;
-        NotifTitle.Text = d.Title.Length > 0 ? d.Title : d.App;
-        NotifBody.Text = d.Body;
-        NotifBody.Visibility = d.Body.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        NotifIcon.Source = d.Icon;
-        NotifGlyph.Text = d.Glyph;
-        NotifGlyph.Visibility = d.Icon == null ? Visibility.Visible : Visibility.Collapsed;
-
+        BannerApp.Text = d.App.ToUpperInvariant();
+        BannerTitle.Text = d.Title.Length > 0 ? d.Title : d.App;
+        BannerBody.Text = d.Body;
+        BannerBody.Visibility = d.Body.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BannerIcon.Source = d.Icon;
+        BannerGlyph.Text = d.Glyph;
+        BannerGlyph.Visibility = d.Icon == null ? Visibility.Visible : Visibility.Collapsed;
         var tint = d.Tint ?? (d.Icon is System.Windows.Media.Imaging.BitmapSource b ? ColorUtil.Dominant(b) : _theme.Current);
-        NotifApp.Foreground = new SolidColorBrush(AccentTheme.Lighter(tint, 0.25));
-        Motion.Color(NotifGlowStop, GradientStop.ColorProperty, AccentTheme.WithAlpha(tint, 0x50), 300);
-        NotifTimer.Background = new SolidColorBrush(tint);
-        NotifReply.Visibility = d.Chat != null ? Visibility.Visible : Visibility.Collapsed;
-        NotifOpenText.Text = d.App.Length > 0 && d.App.Length <= 14 ? $"Open {d.App}" : "Open";
-        UpdateNotifMore();
+        BannerTintStop.Color = AccentTheme.WithAlpha(tint, 0x48);
+        BannerReply.Visibility = d.Chat != null ? Visibility.Visible : Visibility.Collapsed;
+        BannerOpenText.Text = d.App.Length is > 0 and <= 14 ? $"Open {d.App}" : "Open";
+        UpdateBannerStack();
 
-        ShowCard(NotifView, 460, 118, 600000);       // our own countdown closes it (and pauses on hover)
-        Motion.Pop(NotifIconScale, 0.35, 1, 640, 0.75);
-        Motion.SlideIn(NotifText, same ? 12 : 8, 380, same ? 0 : 120);
-        Motion.SlideIn(NotifActions, 8, 380, 220);
-        _notifTotal = _notifLeft = d.Chat != null ? 7500 : 5600;
+        // sit just under the pill
+        var top = Notch.ActualHeight + 12;
+        Banner.Margin = new Thickness(0, top, 0, 0);
+        Banner.Visibility = Visibility.Visible;
+        Banner.UpdateLayout();
+        var w = BannerCard.ActualWidth;
+        var h = BannerCard.ActualHeight;
+        BannerGlass.Clip = new RectangleGeometry(new Rect(0, 0, w, h), 20, 20);
+
+        // frosted glass: blur what's on screen behind the card
+        const double pad = 40;
+        var x = (Root.ActualWidth - w) / 2;
+        var shot = Frost.Behind(this, new Rect(x, top, w, h), pad);
+        BannerBackdrop.Source = shot;
+        BannerBackdrop.Width = w + 2 * pad;
+        BannerBackdrop.Height = h + 2 * pad;
+        BannerBackdrop.Margin = new Thickness(-pad);   // bigger than the card, but must not change its size
+
+        _notifLeft = d.Chat != null ? 7500 : 5800;
         _notifTick.Stop();
         _notifTick.Start();
+
+        if (!fresh || _bannerOpen)
+        {
+            // next one in the stack: a quick swap
+            Motion.SlideIn(BannerText, 10, 340);
+            Motion.Pop(BannerIconScale, 0.6, 1, 500, 0.6);
+            _bannerOpen = true;
+            return;
+        }
+        _bannerOpen = true;
+
+        // 1) a droplet squeezes out of the notch and falls…
+        Eyes.Attend(0, 3, 900);
+        BannerCard.Opacity = 0;
+        BannerDrop.Opacity = 1;
+        BannerDropY.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-14, 8, TimeSpan.FromMilliseconds(300)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } });
+        BannerDropScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.35, 0.85, TimeSpan.FromMilliseconds(300)));
+        BannerDropScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.35, 1.3, TimeSpan.FromMilliseconds(300)));
+
+        // 2) …splats, and blooms into the frosted card
+        var bloom = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(290) };
+        bloom.Tick += (_, _) =>
+        {
+            bloom.Stop();
+            var splatX = new DoubleAnimation(1.6, TimeSpan.FromMilliseconds(140));
+            var splatY = new DoubleAnimation(0.6, TimeSpan.FromMilliseconds(140));
+            BannerDropScale.BeginAnimation(ScaleTransform.ScaleXProperty, splatX);
+            BannerDropScale.BeginAnimation(ScaleTransform.ScaleYProperty, splatY);
+            BannerDrop.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(220)) { BeginTime = TimeSpan.FromMilliseconds(80) });
+
+            BannerCard.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)));
+            BannerScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.08, 1, TimeSpan.FromMilliseconds(560)) { EasingFunction = new ElasticEase { Oscillations = 1, Springiness = 6, EasingMode = EasingMode.EaseOut } });
+            BannerScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.12, 1, TimeSpan.FromMilliseconds(480)) { EasingFunction = new BackEase { Amplitude = 0.35, EasingMode = EasingMode.EaseOut } });
+            BannerY.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-6, 0, TimeSpan.FromMilliseconds(480)) { EasingFunction = Motion.Spring(0.4) });
+            Motion.Pop(BannerIconScale, 0.3, 1, 640, 0.75);
+            Motion.SlideIn(BannerText, 8, 420, 140);
+        };
+        bloom.Start();
+    }
+
+    private void UpdateBannerStack()
+    {
+        var more = _notifQueue.Count;
+        BannerMore.Visibility = more > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BannerMoreText.Text = $"+{more}";
+        if (more > 0 && BannerStack.Visibility != Visibility.Visible)
+        {
+            BannerStack.Visibility = Visibility.Visible;
+            BannerStack.Opacity = 0;
+            Motion.Show(BannerStack, 260, 0, blur: 0, fromY: -6);
+        }
+        else if (more == 0) BannerStack.Visibility = Visibility.Collapsed;
     }
 
     private void OnNotifTick()
     {
-        if (_mode != Mode.Peek || _card != NotifView) { _notifTick.Stop(); _notif = null; _notifQueue.Clear(); return; }
-        if (!Notch.IsMouseOver) _notifLeft -= _notifTick.Interval.TotalMilliseconds;   // pauses while you hover
-        NotifTimer.Width = Math.Max(0, NotifTimerTrack.ActualWidth * _notifLeft / _notifTotal);
+        if (!_bannerOpen) { _notifTick.Stop(); return; }
+        if (!_bannerHover) _notifLeft -= _notifTick.Interval.TotalMilliseconds;   // pauses while you hover
         if (_notifLeft <= 0) NextNotif();
     }
 
@@ -993,44 +1133,99 @@ public partial class NotchWindow : Window
         {
             var next = _notifQueue[0];
             _notifQueue.RemoveAt(0);
-            PresentNotif(next);
+            PresentBanner(next, fresh: false);
             return;
         }
+        CloseBanner();
+    }
+
+    /// <summary>The card shrinks back into a droplet that rises into the notch.</summary>
+    private void CloseBanner(bool instant = false)
+    {
         _notifTick.Stop();
         _notif = null;
-        EndPeek();
-    }
-
-    private void UpdateNotifMore()
-    {
-        NotifMore.Visibility = _notifQueue.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        NotifMoreText.Text = $"+{_notifQueue.Count} more";
-    }
-
-    private void NotifView_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (_notif == null) return;
-        _pendingChat = _notif.Chat;
-        _notifTick.Stop();
         _notifQueue.Clear();
-        _notif = null;
+        if (!_bannerOpen) return;
+        _bannerOpen = false;
+        _bannerHover = false;
+        if (instant) { Banner.Visibility = Visibility.Collapsed; return; }
+        var ease = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseIn };
+        BannerScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.1, TimeSpan.FromMilliseconds(300)) { EasingFunction = ease });
+        BannerScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.15, TimeSpan.FromMilliseconds(300)) { EasingFunction = ease });
+        BannerCard.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(240)) { BeginTime = TimeSpan.FromMilliseconds(80) });
+        BannerStack.Visibility = Visibility.Collapsed;
+        var rise = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        rise.Tick += (_, _) =>
+        {
+            rise.Stop();
+            BannerDropScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.8, 0.3, TimeSpan.FromMilliseconds(260)));
+            BannerDropScale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1.1, 0.4, TimeSpan.FromMilliseconds(260)));
+            BannerDropY.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(6, -16, TimeSpan.FromMilliseconds(260)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } });
+            BannerDrop.BeginAnimation(OpacityProperty, new DoubleAnimationUsingKeyFrames
+            {
+                KeyFrames = { new LinearDoubleKeyFrame(1, KeyTime.FromPercent(0.1)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) },
+                Duration = TimeSpan.FromMilliseconds(260),
+            });
+            var done = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(280) };
+            done.Tick += (_, _) => { done.Stop(); if (!_bannerOpen) Banner.Visibility = Visibility.Collapsed; Eyes.Blink(); };
+            done.Start();
+        };
+        rise.Start();
+    }
+
+    private void Banner_MouseEnter(object sender, MouseEventArgs e)
+    {
+        _bannerHover = true;
+        Motion.To(BannerClose, OpacityProperty, 1, 160);
+        Motion.To(BannerActions, OpacityProperty, 1, 200);
+        Motion.To(BannerActions, HeightProperty, 34, 260, Motion.Spring(0.3));
+        Motion.Scale(BannerScale, 1.015, 260);
+    }
+
+    private void Banner_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _bannerHover = false;
+        Motion.To(BannerClose, OpacityProperty, 0, 200);
+        Motion.To(BannerActions, OpacityProperty, 0, 160);
+        Motion.To(BannerActions, HeightProperty, 0, 220, Motion.Out);
+        Motion.Scale(BannerScale, 1, 260);
+    }
+
+    private void Banner_Click(object sender, MouseButtonEventArgs e)
+    {
+        var d = _notif;
+        if (d == null || e.Handled) return;
+        if (d.Chat != null) { OpenChatFromBanner(d.Chat); return; }
+        if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
+        CloseBanner();
+    }
+
+    private void OpenChatFromBanner(ChatThread chat)
+    {
+        CloseBanner(instant: true);
+        _pendingChat = chat;
         Expand();
     }
 
-    private void NotifReply_Click(object sender, RoutedEventArgs e) => NotifView_Click(sender, null!);
-
-    private void NotifDismiss_Click(object sender, RoutedEventArgs e)
+    private void BannerReply_Click(object sender, RoutedEventArgs e)
     {
-        Motion.SlideIn(NotifText, -6, 160);
-        NextNotif();
+        e.Handled = true;
+        if (_notif?.Chat is { } c) OpenChatFromBanner(c);
     }
 
-    private void NotifOpen_Click(object sender, RoutedEventArgs e)
+    private void BannerOpen_Click(object sender, RoutedEventArgs e)
     {
+        e.Handled = true;
         var d = _notif;
         if (d == null) return;
         if (d.Chat != null) ChatService.OpenApp(d.App);
         else if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
+        NextNotif();
+    }
+
+    private void BannerClose_Click(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
         NextNotif();
     }
 
@@ -1384,6 +1579,7 @@ public partial class NotchWindow : Window
         if (_tick % 20 == 0) UpdateBattery();
         if (_tick % 8 == 4) _activity.Refresh();
         if (_tick % 4 == 0) { _activity.Tick(); UpdateLive(); MaybeChatter(); }
+        if (_tick % 20 == 10) MaybeStandby();
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -1445,19 +1641,24 @@ public partial class NotchWindow : Window
     private void ApplyShape()
     {
         var r = NotchRadius;
-        Notch.CornerRadius = new CornerRadius(0, 0, r, r);
+        var tr = NotchTopRadius;
+        Notch.CornerRadius = new CornerRadius(tr, tr, r, r);
         double w = Notch.ActualWidth, h = Notch.ActualHeight;
         if (w <= 0 || h <= 0) return;
         r = Math.Min(r, Math.Min(w, h) / 2);
+        tr = Math.Min(tr, Math.Min(w, h) / 2);
         var g = new StreamGeometry();
         using (var c = g.Open())
         {
-            c.BeginFigure(new Point(0, 0), true, true);
-            c.LineTo(new Point(w, 0), false, false);
+            c.BeginFigure(new Point(tr, 0), true, true);
+            c.LineTo(new Point(w - tr, 0), false, false);
+            if (tr > 0.1) c.ArcTo(new Point(w, tr), new Size(tr, tr), 0, false, SweepDirection.Clockwise, false, false);
             c.LineTo(new Point(w, h - r), false, false);
             c.ArcTo(new Point(w - r, h), new Size(r, r), 0, false, SweepDirection.Clockwise, false, false);
             c.LineTo(new Point(r, h), false, false);
             c.ArcTo(new Point(0, h - r), new Size(r, r), 0, false, SweepDirection.Clockwise, false, false);
+            c.LineTo(new Point(0, tr), false, false);
+            if (tr > 0.1) c.ArcTo(new Point(tr, 0), new Size(tr, tr), 0, false, SweepDirection.Clockwise, false, false);
         }
         g.Freeze();
         NotchContent.Clip = g;
@@ -1531,12 +1732,33 @@ public partial class NotchWindow : Window
     {
         if (Expanded || _intro) return;
         var wasPeek = _mode == Mode.Peek;
+        if (_bannerOpen) CloseBanner(instant: true);
+        HideBubble();
+
+        // frosted glass: blur what's behind the spot the open island will cover
+        if (App.SnapshotDir == null)
+        {
+            const double pad = 50;
+            var area = new Rect((Root.ActualWidth - ExpandedW) / 2, FloatGap, ExpandedW, ExpandedHChat + 12);
+            FrostImage.Source = Frost.Behind(this, area, pad);
+            FrostImage.Width = ExpandedW + 2 * pad;
+            FrostImage.Height = area.Height + 2 * pad;
+            FrostImage.Margin = new Thickness(0, -pad, 0, 0);
+            FrostImage.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(420)));
+        }
+
         _mode = Mode.Expanded;
         _peekTimer.Stop();
         _collapseTimer.Stop();
         SetGlass(Mode.Expanded);
         SetBlur(true);
         Motion.To(NotchHost, OpacityProperty, 1, 150);
+
+        // float free of the top edge: drop down, round the top corners, melt the ears away
+        Motion.To(_hostY, TranslateTransform.YProperty, FloatGap, 560, Motion.Spring(0.35));
+        Motion.To(this, NotchTopRadiusProperty, ExpandedRadius - 4, 480, Motion.Out);
+        Motion.To(EarL, OpacityProperty, 0, 220);
+        Motion.To(EarR, OpacityProperty, 0, 220);
 
         if (TabApps.IsChecked == true) RefreshApps();
         UpdateMediaPanel(trackChanged: false);
@@ -1545,7 +1767,7 @@ public partial class NotchWindow : Window
         Motion.Hide(CollapsedView, 110);
         if (wasPeek && _card != null) { Motion.Hide(_card, 110); _card = null; }
         // hovering a message pop-up opens straight into that conversation, ready to reply
-        if (wasPeek && _pendingChat is { } chat)
+        if (_pendingChat is { } chat)
         {
             _pendingChat = null;
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { TabChats.IsChecked = true; OpenThread(chat); });
@@ -1574,6 +1796,12 @@ public partial class NotchWindow : Window
         _mode = Mode.Collapsed;
         StopTyping();
         SetGlass(Mode.Collapsed);
+        // back up against the screen edge
+        Motion.To(_hostY, TranslateTransform.YProperty, 0, 420, Motion.Spring(0.25));
+        Motion.To(this, NotchTopRadiusProperty, 0, 360, Motion.Out);
+        Motion.To(EarL, OpacityProperty, 1, 380, Motion.Out, 120);
+        Motion.To(EarR, OpacityProperty, 1, 380, Motion.Out, 120);
+        Motion.To(FrostImage, OpacityProperty, 0, 220);
         Motion.Hide(ExpandedView, 130, blur: 12);
         Motion.To(Ambient, OpacityProperty, 0, 220, done: () => { if (!Expanded) SetAmbientDrift(false); });
         Motion.To(Rim, OpacityProperty, 0, 200);

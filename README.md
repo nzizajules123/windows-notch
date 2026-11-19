@@ -64,10 +64,26 @@ then. They talk in little **speech bubbles** under the pill:
 
 ### Notifications
 
-Each notification is a card: the app's icon on a glow in the app's own colour, its tinted name, a bold title and a
-two-line message, with **Reply** (chats), **Open <app>** and **✕**. A thin countdown bar shows when it will close, and it
-pauses while your mouse is on the card. Notifications that arrive together queue up ("+2 more") instead of replacing
-each other. Click the card to open it in the notch.
+Notifications are macOS-style **frosted banners** that drop out of the notch: a black droplet falls from the pill,
+splats and blooms into a separate glass card floating just below it. The card shows the app's icon, its name, a bold
+title and a two-line message. Hover it for the **✕** in its corner and the **Reply** / **Open <app>** buttons; while you
+hover it never closes. Notifications that arrive together stack ("+2", with a card peeking out underneath). When it's
+done, the card shrinks back into a droplet that rises into the notch.
+
+The frosted glass is a heavily blurred picture of what's behind the card, taken as it appears, so it works on any
+Windows build. Windows' own blur draws a square box on some builds.
+
+### The open notch floats
+
+When it opens, the island lets go of the screen edge: it drops a little, rounds all four corners and sits on frosted
+glass washed with the colours of whatever is playing.
+
+### Standby clock
+
+Windows' real lock screen runs on a protected desktop that no app can draw on, so the notch can't show there. Instead,
+after 5 minutes away (or **Control → Standby clock**) it shows a macOS-lock-screen-style clock: your desktop heavily
+blurred, the date and a big time, sleepy eyes and a frosted now-playing card. Move the mouse or press a key and it fades
+away. It never covers a fullscreen video. Turn the automatic clock off with the switch next to the button.
 
 ### Look
 
