@@ -430,6 +430,11 @@
                                 </StackPanel>
                             </Grid>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <!-- privacy screen: blur everything behind the big clock, right now -->
+                                <Button x:Name="PrivacyButton" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="0,0,8,0" Click="StandbyNow_Click"
+                                        ToolTip="Privacy screen — blur everything (Ctrl+Alt+P)">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="12" Foreground="{StaticResource FgDim}"/>
+                                </Button>
                                 <Grid x:Name="HeadCamDot" Width="8" Height="8" Margin="0,0,10,0" Visibility="Collapsed" ToolTip="Gesture camera is watching">
                                     <Ellipse Fill="{StaticResource GradCamera}">
                                         <Ellipse.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="0" Color="#FF30D158" Opacity="0.9"/></Ellipse.Effect>
@@ -1173,8 +1178,8 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                         <CheckBox x:Name="StandbySwitch" Style="{StaticResource Switch}" Click="StandbySwitch_Click"
                                                   ToolTip="Show the big clock after 5 minutes away"/>
-                                        <Button Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="StandbyNow_Click" ToolTip="Show the standby clock now">
-                                            <TextBlock Text="Standby clock" FontSize="11"/>
+                                        <Button Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="StandbyNow_Click" ToolTip="Blur the screen behind the big clock now (Ctrl+Alt+P)">
+                                            <TextBlock Text="Privacy screen" FontSize="11"/>
                                         </Button>
                                     </StackPanel>
                                     <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Padding="10,4" Margin="0,6,0,0" Click="Quit_Click">

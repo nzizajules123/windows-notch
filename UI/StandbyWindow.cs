@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -27,10 +27,14 @@ public sealed class StandbyWindow : Window
     private readonly NotchEyes _eyes = new();
     private Point? _mouseStart;
     private bool _closing;
+    private readonly bool _manual;
+    private readonly DateTime _shownAt = DateTime.Now;
 
-    public StandbyWindow(MediaService media)
+    /// <param name="manual">opened on purpose as a privacy screen: mouse moves don't close it, only a click or a key</param>
+    public StandbyWindow(MediaService media, bool manual = false)
     {
         _media = media;
+        _manual = manual;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
@@ -125,7 +129,7 @@ public sealed class StandbyWindow : Window
         foot.Children.Add(_battery);
         foot.Children.Add(new TextBlock
         {
-            Text = "Move the mouse or press any key to return", FontSize = 12, Margin = new Thickness(0, 6, 0, 0),
+            Text = manual ? "Click or press any key to return" : "Move the mouse or press any key to return", FontSize = 12, Margin = new Thickness(0, 6, 0, 0),
             Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)), HorizontalAlignment = HorizontalAlignment.Center,
         });
         root.Children.Add(foot);
@@ -149,13 +153,27 @@ public sealed class StandbyWindow : Window
         };
         Closed += (_, _) => { _clock.Stop(); _media.Changed -= Refresh; };
 
-        PreviewKeyDown += (_, e) => Dismiss("key " + e.Key);
-        PreviewMouseDown += (_, e) => { if (e.OriginalSource is not Border b || b.Child != _playGlyph) Dismiss("click"); };
+        // a short grace period so the click / shortcut that opened it doesn't close it straight away
+        bool Settled() => (DateTime.Now - _shownAt).TotalMilliseconds > 700;
+        PreviewKeyDown += (_, e) =>
+        {
+            var k = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (k is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+            e.Handled = true;
+            if (Settled()) Dismiss("key " + k);
+        };
+        PreviewMouseDown += (_, e) =>
+        {
+            if (e.OriginalSource is Border b && b.Child == _playGlyph) return;
+            if (e.OriginalSource is TextBlock tb && tb == _playGlyph) return;
+            if (Settled()) Dismiss("click");
+        };
         PreviewMouseMove += (_, e) =>
         {
+            if (_manual) return;
             var p = e.GetPosition(this);
             _mouseStart ??= p;
-            if ((p - _mouseStart.Value).Length > 12) Dismiss("mouse");
+            if ((p - _mouseStart.Value).Length > 12 && Settled()) Dismiss("mouse");
         };
     }
 

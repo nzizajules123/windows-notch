@@ -209,6 +209,7 @@ public partial class NotchWindow : Window
     {
         _hwnd = new WindowInteropHelper(this).Handle;
         Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
+        if (App.SnapshotDir == null) RegisterPrivacyHotkey();
         PositionWindow();
         // System blur is off: on this Windows build DWM draws accent / system backdrops as a solid square
         // that ignores the window's rounded clip region, so the island is drawn entirely by WPF instead
@@ -1005,13 +1006,16 @@ public partial class NotchWindow : Window
     // =======================================================================
     private StandbyWindow? _standby;
 
-    private void ShowStandby()
+    /// <param name="manual">opened on purpose (button / Ctrl+Alt+P): a privacy screen that stays until you click or press a key</param>
+    private void ShowStandby(bool manual = false)
     {
-        if (_standby != null || App.SnapshotDir != null) return;
-        App.Log("standby: showing");
+        if (App.SnapshotDir != null) return;
+        if (_standby != null) { if (manual) _standby.Dismiss("toggle"); return; }   // the shortcut toggles it
+        App.Log($"standby: showing ({(manual ? "manual" : "idle")})");
         if (Expanded) Collapse();
         HideBubble();
-        _standby = new StandbyWindow(_media);
+        StopTyping();
+        _standby = new StandbyWindow(_media, manual);
         _standby.Closed += (_, _) =>
         {
             _standby = null;
@@ -1041,7 +1045,30 @@ public partial class NotchWindow : Window
                r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
     }
 
-    private void StandbyNow_Click(object sender, RoutedEventArgs e) => ShowStandby();
+    private void StandbyNow_Click(object sender, RoutedEventArgs e)
+    {
+        // let the notch fold away first so the blurred picture is of your desktop, not of the open notch
+        if (Expanded) Collapse();
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+        t.Tick += (_, _) => { t.Stop(); ShowStandby(manual: true); };
+        t.Start();
+    }
+
+    // ---- Ctrl+Alt+P: privacy screen from anywhere
+    private const int HotkeyPrivacy = 0x4E01;
+
+    private void RegisterPrivacyHotkey()
+    {
+        var src = HwndSource.FromHwnd(_hwnd);
+        src?.AddHook((IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled) =>
+        {
+            if (msg == 0x0312 && w.ToInt32() == HotkeyPrivacy) { handled = true; ShowStandby(manual: true); }   // WM_HOTKEY
+            return IntPtr.Zero;
+        });
+        // MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P'
+        if (!Native.RegisterHotKey(_hwnd, HotkeyPrivacy, 0x0002 | 0x0001 | 0x4000, 0x50))
+            App.Log("privacy hotkey: Ctrl+Alt+P is taken by another app");
+    }
 
     private void LivePillSwitch_Click(object sender, RoutedEventArgs e)
     {

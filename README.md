@@ -102,6 +102,10 @@ after 5 minutes away (or **Control → Standby clock**) it shows a macOS-lock-sc
 blurred, the date and a big time, sleepy eyes and a frosted now-playing card. Move the mouse or press a key and it fades
 away. It never covers a fullscreen video. Turn the automatic clock off with the switch next to the button.
 
+**Privacy screen:** open it yourself any time with the lock button at the top of the open notch, **Control → Privacy
+screen**, or **Ctrl+Alt+P** from anywhere. Opened this way it stays up when the mouse moves (so a bumped desk doesn't
+reveal your screen); click or press any key to return. Ctrl+Alt+P again also closes it.
+
 ### Look
 
 When small, the island is a little floating frosted capsule showing just the time, the eyes and battery %; when open it is dark smoked glass, with smooth rounded corners. Gradients are kept to a
