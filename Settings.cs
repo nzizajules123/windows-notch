@@ -15,6 +15,8 @@ public sealed class Settings
     public bool EyesTalk { get; set; } = true;
     /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
     public int StandbyAfterMinutes { get; set; } = 5;
+    /// <summary>Show "Claude is working…" style live activity in the small pill (off: only in the Activity tab).</summary>
+    public bool LiveInPill { get; set; } = false;
     /// <summary>Experimental Windows blur behind the island (off: some Windows builds draw it as a square box).</summary>
     public bool SystemBlur { get; set; } = false;
     /// <summary>"auto" (Python if installed, else built-in), "python" or "web".</summary>

@@ -6,7 +6,7 @@
         Title="Windows Notch"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" ShowActivated="False"
-        Width="780" Height="380"
+        Width="780" Height="560"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         Foreground="{StaticResource Fg}"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
@@ -93,6 +93,31 @@
                 </Trigger>
             </DataTemplate.Triggers>
         </DataTemplate>
+        <!-- one notification (history panel + "View all" stack) -->
+        <DataTemplate x:Key="NotifRow">
+            <Button Style="{StaticResource RowButton}" Margin="0,0,0,6" Padding="10,9" Click="NotifRow_Click" Tag="{Binding}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="34" Height="34" VerticalAlignment="Top">
+                        <Border CornerRadius="10" Background="#24FFFFFF">
+                            <TextBlock Style="{StaticResource Glyph}" Text="{Binding Glyph}" FontSize="14" Visibility="{Binding GlyphVisibility}"/>
+                        </Border>
+                        <Image Source="{Binding Icon}" Width="34" Height="34" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Grid>
+                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                        <Grid>
+                            <TextBlock Text="{Binding AppUpper}" FontSize="10.5" FontWeight="SemiBold" Foreground="#99F5F5F7"/>
+                            <TextBlock Text="{Binding When}" FontSize="10" Foreground="{StaticResource FgFaint}" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                        <TextBlock Text="{Binding Body}" FontSize="12" Foreground="{StaticResource FgDim}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="32"/>
+                    </StackPanel>
+                </Grid>
+            </Button>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid x:Name="Root">
@@ -107,6 +132,10 @@
                 Background="Black" CornerRadius="{Binding CornerRadius, ElementName=Notch}">
             <Border.Effect><DropShadowEffect BlurRadius="26" ShadowDepth="6" Direction="270" Opacity="0.7" Color="Black"/></Border.Effect>
         </Border>
+
+        <!-- invisible strip along the screen edge above the floating pill: flick the mouse up to open it -->
+        <Border x:Name="TopHotZone" HorizontalAlignment="Center" VerticalAlignment="Top" Height="8" Background="#01000000"
+                Width="{Binding ActualWidth, ElementName=Notch}" MouseEnter="Notch_MouseEnter" MouseLeave="Notch_MouseLeave"/>
 
         <StackPanel x:Name="NotchHost" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Top">
             <!-- concave "ears" that melt the island into the top edge of the screen -->
@@ -382,6 +411,12 @@
                                     </RadioButton>
                                     <RadioButton x:Name="TabActivity" Style="{StaticResource TabButton}" GroupName="tabs" Tag="6" Checked="Tab_Checked" ToolTip="Claude, ChatGPT &amp; VS Code activity">
                                         <StackPanel Orientation="Horizontal"><Grid><TextBlock Style="{StaticResource Glyph}" Text="&#xE945;" FontSize="12.5"/><Ellipse x:Name="ActivityBadge" Width="6" Height="6" Fill="#FF0A84FF" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0" Visibility="Collapsed"/></Grid><TextBlock Style="{StaticResource TabLabel}" Text="Activity"/></StackPanel>
+                                    </RadioButton>
+                                    <RadioButton x:Name="TabNotifs" Style="{StaticResource TabButton}" GroupName="tabs" Tag="7" Checked="Tab_Checked" ToolTip="Notifications">
+                                        <StackPanel Orientation="Horizontal"><Grid><TextBlock Style="{StaticResource Glyph}" Text="&#xEA8F;" FontSize="12.5"/><Ellipse x:Name="NotifsBadge" Width="6" Height="6" Fill="#FFFF453A" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0" Visibility="Collapsed"/></Grid><TextBlock Style="{StaticResource TabLabel}" Text="Alerts"/></StackPanel>
+                                    </RadioButton>
+                                    <RadioButton x:Name="TabTodo" Style="{StaticResource TabButton}" GroupName="tabs" Tag="8" Checked="Tab_Checked" ToolTip="To-do &amp; reminders">
+                                        <StackPanel Orientation="Horizontal"><Grid><TextBlock Style="{StaticResource Glyph}" Text="&#xE73A;" FontSize="12.5"/><Ellipse x:Name="TodoBadge" Width="6" Height="6" Fill="#FFFFB020" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0" Visibility="Collapsed"/></Grid><TextBlock Style="{StaticResource TabLabel}" Text="To-do"/></StackPanel>
                                     </RadioButton>
                                     <RadioButton x:Name="TabApps" Style="{StaticResource TabButton}" GroupName="tabs" Tag="1" Checked="Tab_Checked" ToolTip="Apps">
                                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE71D;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Apps"/></StackPanel>
@@ -764,8 +799,11 @@
                                     </Grid>
                                     <TextBlock x:Name="ActivitySummary" Text="All quiet" FontSize="12" FontWeight="SemiBold"/>
                                 </StackPanel>
-                                <TextBlock Text="Claude · ChatGPT · VS Code · Antigravity · terminals" FontSize="10.5" Foreground="{StaticResource FgFaint}"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock Text="Show in pill" FontSize="11" Foreground="{StaticResource FgDim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <CheckBox x:Name="LivePillSwitch" Style="{StaticResource Switch}" Click="LivePillSwitch_Click"
+                                              ToolTip="Show running work (Claude, builds, terminal jobs) live in the small pill"/>
+                                </StackPanel>
                             </Grid>
 
                             <StackPanel x:Name="ActivityEmpty" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
@@ -895,6 +933,111 @@
                                                     </Grid>
                                                 </Grid>
                                             </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- ===== NOTIFICATIONS (history) ===== -->
+                        <Grid x:Name="NotifsPanel" Grid.Row="1" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Margin="2,0,2,8">
+                                <TextBlock x:Name="NotifsCount" Text="Notifications" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <Button Style="{StaticResource ChipButton}" HorizontalAlignment="Right" Click="NotifsClear_Click">
+                                    <TextBlock Text="Clear all" FontSize="11"/>
+                                </Button>
+                            </Grid>
+                            <StackPanel x:Name="NotifsEmpty" Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <Border Width="46" Height="46" CornerRadius="23" Background="#1FFFFFFF" HorizontalAlignment="Center">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xEA8F;" FontSize="19"/>
+                                </Border>
+                                <TextBlock Text="You're all caught up" FontSize="14.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,3"/>
+                                <TextBlock Text="Notifications you get will be kept here" FontSize="11.5" Foreground="{StaticResource FgDim}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
+                                <ItemsControl x:Name="NotifsList" ItemTemplate="{StaticResource NotifRow}"/>
+                            </ScrollViewer>
+                        </Grid>
+
+                        <!-- ===== TO-DO + REMINDERS ===== -->
+                        <Grid x:Name="TodoPanel" Grid.Row="1" Margin="0,8,0,0" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Border CornerRadius="18" Background="#1AFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1" Height="38" Margin="0,0,46,0">
+                                    <Grid>
+                                        <TextBlock x:Name="TodoHint" Text="Add a task… try “call mom at 5pm” or “stretch in 20 min”" FontSize="12.5"
+                                                   Foreground="{StaticResource FgFaint}" Margin="15,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                        <TextBox x:Name="TodoBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
+                                                 FontSize="13" Margin="11,0,90,0" VerticalAlignment="Center" PreviewMouseDown="TypingBox_MouseDown"
+                                                 TextChanged="TodoBox_TextChanged" KeyDown="TodoBox_KeyDown" LostKeyboardFocus="TypingBox_LostFocus"/>
+                                        <Border x:Name="TodoDuePreview" HorizontalAlignment="Right" Margin="0,0,8,0" CornerRadius="10" Padding="8,2"
+                                                Background="#33FFB020" Visibility="Collapsed" VerticalAlignment="Center">
+                                            <TextBlock x:Name="TodoDueText" FontSize="10.5" FontWeight="SemiBold" Foreground="#FFFFC85A"/>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Button Style="{StaticResource PlayButton}" Width="38" Height="38" HorizontalAlignment="Right" Click="TodoAdd_Click" ToolTip="Add">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE710;" FontSize="14" Foreground="Black"/>
+                                </Button>
+                            </Grid>
+                            <StackPanel x:Name="TodoChips" Grid.Row="1" Orientation="Horizontal" Margin="2,8,0,8">
+                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE823;" FontSize="11" Foreground="{StaticResource FgFaint}" Margin="0,0,8,0"/>
+                                <Button Style="{StaticResource ChipButton}" Margin="0,0,6,0" Click="TodoChip_Click" Tag="15m"><TextBlock Text="+15 min" FontSize="11"/></Button>
+                                <Button Style="{StaticResource ChipButton}" Margin="0,0,6,0" Click="TodoChip_Click" Tag="1h"><TextBlock Text="+1 hour" FontSize="11"/></Button>
+                                <Button Style="{StaticResource ChipButton}" Margin="0,0,6,0" Click="TodoChip_Click" Tag="tonight"><TextBlock Text="Tonight" FontSize="11"/></Button>
+                                <Button Style="{StaticResource ChipButton}" Margin="0,0,6,0" Click="TodoChip_Click" Tag="tomorrow"><TextBlock Text="Tomorrow 9:00" FontSize="11"/></Button>
+                                <Button Style="{StaticResource ChipButton}" Click="TodoChip_Click" Tag="none"><TextBlock Text="No reminder" FontSize="11" Foreground="{StaticResource FgDim}"/></Button>
+                            </StackPanel>
+                            <StackPanel x:Name="TodoEmpty" Grid.Row="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <TextBlock Text="✨ Nothing to do" FontSize="14.5" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Add a task above — the notch will remind you when it's time" FontSize="11.5" Foreground="{StaticResource FgDim}" HorizontalAlignment="Center" Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden">
+                                <ItemsControl x:Name="TodoList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid x:Name="row" Margin="0,0,0,5" Background="Transparent">
+                                                <Border CornerRadius="12" Background="#0FFFFFFF" BorderBrush="#14FFFFFF" BorderThickness="1"/>
+                                                <Grid Margin="10,8,8,8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <!-- round checkbox -->
+                                                    <Border Width="20" Height="20" CornerRadius="10" BorderThickness="1.6" BorderBrush="#66FFFFFF" Background="{Binding CheckFill}"
+                                                            Cursor="Hand" MouseLeftButtonUp="TodoCheck_Click" Tag="{Binding}" RenderTransformOrigin="0.5,0.5" VerticalAlignment="Center">
+                                                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE73E;" FontSize="10" Foreground="Black" FontWeight="Bold" Visibility="{Binding CheckVisibility}"/>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Text}" FontSize="13" Margin="11,0,8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                               Opacity="{Binding TextOpacity}" TextDecorations="{Binding Decorations}"/>
+                                                    <Border Grid.Column="2" CornerRadius="9" Padding="8,2" Background="{Binding DueBackground}" Visibility="{Binding DueVisibility}" VerticalAlignment="Center">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE823;" FontSize="9.5" Foreground="{Binding DueBrush}" Margin="0,0,5,0"/>
+                                                            <TextBlock Text="{Binding DueText}" FontSize="10.5" FontWeight="SemiBold" Foreground="{Binding DueBrush}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Button x:Name="del" Grid.Column="3" Style="{StaticResource IconButton}" Width="22" Height="22" Margin="6,0,0,0" Opacity="0"
+                                                            Click="TodoDelete_Click" Tag="{Binding}" ToolTip="Delete">
+                                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="8" Foreground="{StaticResource FgDim}"/>
+                                                    </Button>
+                                                </Grid>
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <Trigger SourceName="row" Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="del" Property="Opacity" Value="1"/>
+                                                </Trigger>
+                                            </DataTemplate.Triggers>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -1092,6 +1235,35 @@
             <Path x:Name="EarR" Data="M12,0 L0,0 L0,12 A12,12 0 0 1 12,0 Z" Fill="Black" VerticalAlignment="Top" Width="12" Height="12"/>
         </StackPanel>
 
+        <!-- ===== "View all": the notification stack fanned out into a scrolling list (iPhone style) ===== -->
+        <Grid x:Name="BannerList" HorizontalAlignment="Center" VerticalAlignment="Top" Width="380" Margin="0,44,0,0" Visibility="Collapsed"
+              MouseLeave="BannerList_MouseLeave" MouseEnter="BannerList_MouseEnter">
+            <Grid.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="9" Direction="270" Opacity="0.42"/></Grid.Effect>
+            <Grid x:Name="BannerListGlass">
+                <Image x:Name="BannerListBackdrop" Stretch="Fill" HorizontalAlignment="Center" VerticalAlignment="Top" IsHitTestVisible="False">
+                    <Image.Effect><BlurEffect Radius="46" KernelType="Gaussian" RenderingBias="Quality"/></Image.Effect>
+                </Image>
+                <Rectangle Fill="#B31B1B1F"/>
+                <Border CornerRadius="22" BorderBrush="#30FFFFFF" BorderThickness="1" IsHitTestVisible="False"/>
+                <Grid Margin="10,10,10,6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid Margin="6,0,2,8">
+                        <TextBlock x:Name="BannerListTitle" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource ChipButton}" Margin="0,0,6,0" Click="BannerListClear_Click"><TextBlock Text="Clear" FontSize="11"/></Button>
+                            <Button Style="{StaticResource ChipButton}" Click="BannerListClose_Click"><TextBlock Text="Show less" FontSize="11"/></Button>
+                        </StackPanel>
+                    </Grid>
+                    <ScrollViewer x:Name="BannerListScroll" Grid.Row="1" MaxHeight="388" VerticalScrollBarVisibility="Hidden">
+                        <ItemsControl x:Name="BannerListItems" ItemTemplate="{StaticResource NotifRow}"/>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Grid>
+
         <!-- ===== macOS-style notification banner: drops out of the notch and floats just below it ===== -->
         <Grid x:Name="Banner" HorizontalAlignment="Center" VerticalAlignment="Top" Width="372" Margin="0,44,0,0" Visibility="Collapsed"
               Background="Transparent" Cursor="Hand" MouseLeftButtonUp="Banner_Click" MouseEnter="Banner_MouseEnter" MouseLeave="Banner_MouseLeave">
@@ -1160,7 +1332,7 @@
                             <Grid>
                                 <TextBlock x:Name="BannerApp" FontSize="11" FontWeight="SemiBold" Foreground="#B3F5F5F7" TextTrimming="CharacterEllipsis" Margin="0,0,52,0"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Border x:Name="BannerMore" CornerRadius="7" Background="#2EFFFFFF" Padding="6,0" Margin="0,0,6,0" Visibility="Collapsed">
+                                    <Border x:Name="BannerMore" CornerRadius="7" Background="#2EFFFFFF" Padding="7,1" Margin="0,0,6,0" Visibility="Collapsed" Cursor="Hand" MouseLeftButtonUp="BannerViewAll_Click" ToolTip="View all">
                                         <TextBlock x:Name="BannerMoreText" FontSize="9.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                     </Border>
                                     <TextBlock Text="now" FontSize="10.5" Foreground="{StaticResource FgFaint}"/>
@@ -1173,8 +1345,8 @@
                         <StackPanel x:Name="BannerActions" Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="11,0,0,0" Height="0" Opacity="0">
                             <Button x:Name="BannerReply" Style="{StaticResource ChipButton}" Click="BannerReply_Click" Margin="0,8,6,0">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE97A;" FontSize="10" Margin="0,0,5,0"/>
-                                    <TextBlock Text="Reply" FontSize="11" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="BannerReplyGlyph" Style="{StaticResource Glyph}" Text="&#xE97A;" FontSize="10" Margin="0,0,5,0"/>
+                                    <TextBlock x:Name="BannerReplyText" Text="Reply" FontSize="11" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Button>
                             <Button Style="{StaticResource ChipButton}" Click="BannerOpen_Click" Margin="0,8,0,0">

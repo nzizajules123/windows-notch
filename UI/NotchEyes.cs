@@ -19,7 +19,7 @@ public enum EyeMood { Neutral, Happy, Surprised, Sleepy, Sad, Love, Angry }
 public sealed class NotchEyes : Grid
 {
     private const double D = 12.5, Gap = 7;      // eyeball diameter / distance between eyes
-    private static readonly Color Lid = Color.FromRgb(0, 0, 0);
+    private static readonly Color Lid = Color.FromRgb(0x17, 0x17, 0x1C);   // close to the frosted pill's dark glass
 
     private readonly Eye _left, _right;
     private readonly TranslateTransform _bob = new(), _shake = new();

@@ -59,7 +59,7 @@ public partial class NotchWindow : Window
     private UIElement? _card;                                  // view shown in Peek mode (peek / charge / device)
     // the island's tint over the acrylic blur: solid while collapsed, frosted when open
     private readonly SolidColorBrush _glass = new(Color.FromRgb(0, 0, 0));
-    private static readonly Color GlassCollapsed = Color.FromArgb(0xFF, 0, 0, 0);
+    private static readonly Color GlassCollapsed = Color.FromArgb(0xF0, 0x10, 0x10, 0x14);
     // smoked glass (no system blur behind it, so it stays nearly opaque to keep text readable)
     private static readonly Color GlassPeek = Color.FromArgb(0xF5, 0x0C, 0x0C, 0x10);
     private static readonly Color GlassOpen = Color.FromArgb(0xF0, 0x0E, 0x0E, 0x12);
@@ -138,6 +138,13 @@ public partial class NotchWindow : Window
         _notifTick.Tick += (_, _) => OnNotifTick();
         TalkSwitch.IsChecked = _settings.EyesTalk;
         StandbySwitch.IsChecked = _settings.StandbyAfterMinutes > 0;
+        LivePillSwitch.IsChecked = _settings.LiveInPill;
+        NotifsList.ItemsSource = _history;
+        BannerListItems.ItemsSource = _listItems;
+        TodoList.ItemsSource = _todo.Items;
+        _listClose.Tick += (_, _) => CloseBannerList();
+        UpdateNotifsState();
+        UpdateTodoState();
 
         _kSung.Color = AccentTheme.Lighter(AccentTheme.Default, 0.35);
         _karaoke = new LinearGradientBrush(new GradientStopCollection
@@ -174,7 +181,7 @@ public partial class NotchWindow : Window
         _hoverIntent.Tick += (_, _) =>
         {
             _hoverIntent.Stop();
-            if (!Notch.IsMouseOver) return;
+            if (!Notch.IsMouseOver && !TopHotZone.IsMouseOver) return;
             // hovering / poking the eyes plays with them instead of opening the notch
             if (Eyes.IsMouseOver && _mode == Mode.Collapsed) { _hoverIntent.Start(); return; }
             Expand();
@@ -381,10 +388,11 @@ public partial class NotchWindow : Window
         wake.Tick += (_, _) =>
         {
             wake.Stop();
-            SayLater(Greeting(), 700, 3000);
+            SayLater(Greeting(), 900, 3000);
             Eyes.Jump(1.2);
             Eyes.Blink(twice: true);
             ApplyCollapsed(animate: true);
+            EnterFloatingPill(520);   // let go of the edge and float as a frosted capsule
         };
         wake.Start();
     }
@@ -449,6 +457,20 @@ public partial class NotchWindow : Window
             await Task.Delay(800);
             var anaChat = _chats.Add("WhatsApp", new ToastInfo { Title = "Ana", Body = "Are you coming tonight? We're at the usual place 🍕" }, null); ShowNotif(new NotifData("WhatsApp", "Ana", "Are you coming tonight? We're at the usual place 🍕", null, "\uE8BD", anaChat, Color.FromRgb(0x25, 0xD3, 0x66))); ShowNotif(new NotifData("Mail", "Weekly report", "Your summary is ready", null, "\uE715", null));
             await Task.Delay(1200); Save("1e-notification");
+            ShowNotif(new NotifData("Slack", "#design", "Mia: new mockups for the island are up 👀", null, "", null));
+            ShowNotif(new NotifData("Calendar", "Stand-up in 10 min", "Room 4 · Google Meet", null, "", null));
+            await Task.Delay(500); Save("1e2-notif-stack");
+            BannerViewAll_Click(BannerMore, new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+            await Task.Delay(180); Save("1e3-viewall-unfold");
+            await Task.Delay(1200); Save("1e4-viewall");
+            CloseBannerList();
+            await Task.Delay(700);
+            var demoTodo = new TodoItem { Text = "Call mom", Due = DateTime.Now };
+            ShowNotif(new NotifData("Reminder", demoTodo.Text, $"Due {DateTime.Now:HH:mm}  ·  from your to-do list", null, "", null, Color.FromRgb(0xFF, 0x9F, 0x0A), demoTodo));
+            await Task.Delay(1300); Save("1e5-reminder");
+            CloseBanner(instant: true);
+            _notifQueue.Clear();
+            await Task.Delay(400);
             ShowCharge(true, 79);
             await Task.Delay(1500); Save("1f-charging");
             ShowCharge(false, 79);
@@ -498,8 +520,26 @@ public partial class NotchWindow : Window
             UpdateLive();
             TabActivity.IsChecked = true;
             await Task.Delay(1500); Save("13-activity");
+            TabNotifs.IsChecked = true;
+            await Task.Delay(1200); Save("16-alerts");
+            // to-do: shown from in-memory items only (snapshot never writes your todo.json)
+            var keep = _todo.Items.ToList();
+            _todo.Items.Clear();
+            _todo.Items.Add(new TodoItem { Text = "Send the invoice to Daniel", Due = DateTime.Now.AddMinutes(-5) });
+            _todo.Items.Add(new TodoItem { Text = "Stretch break", Due = DateTime.Now.AddMinutes(25) });
+            _todo.Items.Add(new TodoItem { Text = "Buy groceries", Due = DateTime.Today.AddDays(1).AddHours(9) });
+            _todo.Items.Add(new TodoItem { Text = "Push the notch release" });
+            _todo.Items.Add(new TodoItem { Text = "Reply to Ana", Done = true });
+            UpdateTodoState();
+            TabTodo.IsChecked = true;
+            TodoBox.Text = "call mom at 5pm";
+            await Task.Delay(1200); Save("17-todo");
+            TodoBox.Text = "";
+            _todo.Items.Clear(); foreach (var k in keep) _todo.Items.Add(k);
+            _settings.LiveInPill = true; UpdateLive();
             Collapse();
             await Task.Delay(1600); Save("14-live-pill");
+            _settings.LiveInPill = false;
             Expand();
             await Task.Delay(600);
             {
@@ -633,15 +673,20 @@ public partial class NotchWindow : Window
 
     private void OnNotification(string app, string title, string body, bool isChat = false)
     {
-        if (Expanded || _countdown > 0) return;
-        Eyes.Jump();
-        Eyes.Express(EyeMood.Surprised, 700);
-        Eyes.Attend(4, 0, 700);
         var head = string.IsNullOrWhiteSpace(title) ? app : title;
         var sub = string.IsNullOrWhiteSpace(body) || body == head ? "" : body;
         var icon = AppIconFor(app);
         var chat = isChat ? _pendingChat : null;
         _pendingChat = null;   // only set again when you click the banner / Reply
+        if (Expanded || _countdown > 0)
+        {
+            // no banner while the notch is open — still keep it in the Alerts tab
+            AddHistory(new NotifData(string.IsNullOrWhiteSpace(app) ? "Notification" : app, head, sub, icon, "", chat));
+            return;
+        }
+        Eyes.Jump();
+        Eyes.Express(EyeMood.Surprised, 700);
+        Eyes.Attend(4, 0, 700);
         // let the eyes react first, then open the card
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(480) };
         t.Tick += (_, _) => { t.Stop(); ShowNotif(new NotifData(string.IsNullOrWhiteSpace(app) ? "Notification" : app, head, sub, icon, "\uEA8F", chat)); };
@@ -993,6 +1038,15 @@ public partial class NotchWindow : Window
 
     private void StandbyNow_Click(object sender, RoutedEventArgs e) => ShowStandby();
 
+    private void LivePillSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.LiveInPill = LivePillSwitch.IsChecked == true;
+        _settings.Save();
+        _activityLine = null;
+        UpdateLive();
+        if (_mode == Mode.Collapsed) ApplyCollapsed(animate: true);
+    }
+
     private void StandbySwitch_Click(object sender, RoutedEventArgs e)
     {
         _settings.StandbyAfterMinutes = StandbySwitch.IsChecked == true ? 5 : 0;
@@ -1009,15 +1063,57 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Notifications: a macOS-style frosted banner that drops out of the notch
     // =======================================================================
-    private sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null);
+    public sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null, TodoItem? Todo = null);
+
+    /// <summary>A notification as shown in the Alerts tab and the "View all" list.</summary>
+    public sealed class NotifEntry : System.ComponentModel.INotifyPropertyChanged
+    {
+        public NotifData Data { get; init; } = null!;
+        public DateTime Time { get; init; } = DateTime.Now;
+        public string App => Data.App;
+        public string AppUpper => Data.App.ToUpperInvariant();
+        public string Title => Data.Title;
+        public string Body => Data.Body;
+        public ImageSource? Icon => Data.Icon;
+        public string Glyph => Data.Glyph;
+        public Visibility GlyphVisibility => Data.Icon == null ? Visibility.Visible : Visibility.Collapsed;
+        public string When
+        {
+            get
+            {
+                var d = DateTime.Now - Time;
+                return d.TotalSeconds < 60 ? "now" : d.TotalMinutes < 60 ? $"{(int)d.TotalMinutes}m ago" : d.TotalHours < 24 ? $"{(int)d.TotalHours}h ago" : Time.ToString("ddd HH:mm");
+            }
+        }
+        public void Touch() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(When)));
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+    }
+
+    private readonly System.Collections.ObjectModel.ObservableCollection<NotifEntry> _history = new();
+    private readonly System.Collections.ObjectModel.ObservableCollection<NotifEntry> _listItems = new();
     private readonly List<NotifData> _notifQueue = new();
     private NotifData? _notif;
     private double _notifLeft;
     private bool _bannerOpen, _bannerHover;
     private readonly DispatcherTimer _notifTick = new() { Interval = TimeSpan.FromMilliseconds(50) };
 
+    private void AddHistory(NotifData d)
+    {
+        _history.Insert(0, new NotifEntry { Data = d });
+        while (_history.Count > 60) _history.RemoveAt(_history.Count - 1);
+        if (!(Expanded && _tabIndex == 7)) NotifsBadge.Visibility = Visibility.Visible;
+        UpdateNotifsState();
+    }
+
+    private void UpdateNotifsState()
+    {
+        NotifsEmpty.Visibility = _history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NotifsCount.Text = _history.Count == 0 ? "Notifications" : $"{_history.Count} notification{(_history.Count == 1 ? "" : "s")}";
+    }
+
     private void ShowNotif(NotifData d)
     {
+        AddHistory(d);
         if (Expanded || _countdown > 0 || _intro) return;
         if (_bannerOpen && _notif != null)
         {
@@ -1041,12 +1137,30 @@ public partial class NotchWindow : Window
         BannerGlyph.Visibility = d.Icon == null ? Visibility.Visible : Visibility.Collapsed;
         var tint = d.Tint ?? (d.Icon is System.Windows.Media.Imaging.BitmapSource b ? ColorUtil.Dominant(b) : _theme.Current);
         BannerTintStop.Color = AccentTheme.WithAlpha(tint, 0x48);
-        BannerReply.Visibility = d.Chat != null ? Visibility.Visible : Visibility.Collapsed;
-        BannerOpenText.Text = d.App.Length is > 0 and <= 14 ? $"Open {d.App}" : "Open";
+        if (d.Todo != null)
+        {
+            // reminders: ✓ Done and Snooze, always visible
+            BannerReply.Visibility = Visibility.Visible;
+            BannerReplyGlyph.Text = "";
+            BannerReplyText.Text = "Done";
+            BannerOpenText.Text = "Snooze 10 min";
+            BannerActions.BeginAnimation(HeightProperty, null);
+            BannerActions.BeginAnimation(OpacityProperty, null);
+            BannerActions.Height = 34;
+            BannerActions.Opacity = 1;
+        }
+        else
+        {
+            BannerReply.Visibility = d.Chat != null ? Visibility.Visible : Visibility.Collapsed;
+            BannerReplyGlyph.Text = "";
+            BannerReplyText.Text = "Reply";
+            BannerOpenText.Text = d.App.Length is > 0 and <= 14 ? $"Open {d.App}" : "Open";
+            if (!_bannerHover) { BannerActions.BeginAnimation(HeightProperty, null); BannerActions.Height = 0; BannerActions.BeginAnimation(OpacityProperty, null); BannerActions.Opacity = 0; }
+        }
         UpdateBannerStack();
 
-        // sit just under the pill
-        var top = Notch.ActualHeight + 12;
+        // sit just under the floating pill
+        var top = PillFloat + Notch.ActualHeight + 10;
         Banner.Margin = new Thickness(0, top, 0, 0);
         Banner.Visibility = Visibility.Visible;
         Banner.UpdateLayout();
@@ -1063,7 +1177,7 @@ public partial class NotchWindow : Window
         BannerBackdrop.Height = h + 2 * pad;
         BannerBackdrop.Margin = new Thickness(-pad);   // bigger than the card, but must not change its size
 
-        _notifLeft = d.Chat != null ? 7500 : 5800;
+        _notifLeft = d.Todo != null ? 20000 : d.Chat != null ? 7500 : 5800;
         _notifTick.Stop();
         _notifTick.Start();
 
@@ -1110,7 +1224,7 @@ public partial class NotchWindow : Window
     {
         var more = _notifQueue.Count;
         BannerMore.Visibility = more > 0 ? Visibility.Visible : Visibility.Collapsed;
-        BannerMoreText.Text = $"+{more}";
+        BannerMoreText.Text = $"View all · {more + 1}";
         if (more > 0 && BannerStack.Visibility != Visibility.Visible)
         {
             BannerStack.Visibility = Visibility.Visible;
@@ -1195,9 +1309,246 @@ public partial class NotchWindow : Window
     {
         var d = _notif;
         if (d == null || e.Handled) return;
+        OpenNotification(d);
+    }
+
+    /// <summary>What clicking a notification does: open the chat / the to-do list / the app.</summary>
+    private void OpenNotification(NotifData d)
+    {
+        CloseBannerList();
         if (d.Chat != null) { OpenChatFromBanner(d.Chat); return; }
+        if (d.Todo != null) { CloseBanner(instant: true); Expand(); Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => TabTodo.IsChecked = true); return; }
         if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
         CloseBanner();
+    }
+
+    private void NotifRow_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is NotifEntry n) OpenNotification(n.Data);
+    }
+
+    private void NotifsClear_Click(object sender, RoutedEventArgs e)
+    {
+        var i = 0;
+        foreach (var c in Enumerable.Range(0, _history.Count).Select(k => NotifsList.ItemContainerGenerator.ContainerFromIndex(k)).OfType<FrameworkElement>())
+        {
+            var t = new TranslateTransform();
+            c.RenderTransform = t;
+            Motion.To(t, TranslateTransform.XProperty, 420, 320, new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseIn }, i * 40);
+            Motion.To(c, OpacityProperty, 0, 300, null, i * 40);
+            i++;
+        }
+        var done = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320 + i * 40) };
+        done.Tick += (_, _) => { done.Stop(); _history.Clear(); UpdateNotifsState(); };
+        done.Start();
+    }
+
+    // =======================================================================
+    //  "View all": the stack fans out into a scrolling list (iPhone style)
+    // =======================================================================
+    private readonly DispatcherTimer _listClose = new() { Interval = TimeSpan.FromMilliseconds(1400) };
+    private bool _listOpen;
+
+    private void BannerViewAll_Click(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        var all = new List<NotifData>();
+        if (_notif != null) all.Add(_notif);
+        all.AddRange(_notifQueue);
+        ShowBannerList(all);
+    }
+
+    private void ShowBannerList(List<NotifData> items)
+    {
+        if (items.Count == 0) return;
+        CloseBanner(instant: true);
+        _listItems.Clear();
+        foreach (var d in items) _listItems.Add(_history.FirstOrDefault(h => h.Data == d) ?? new NotifEntry { Data = d });
+        BannerListTitle.Text = $"{items.Count} notifications";
+
+        var top = PillFloat + Notch.ActualHeight + 10;
+        BannerList.Margin = new Thickness(0, top, 0, 0);
+        BannerList.Visibility = Visibility.Visible;
+        BannerList.Opacity = 0;
+        BannerList.UpdateLayout();
+        var w = BannerList.ActualWidth;
+        var h = BannerList.ActualHeight;
+        BannerListGlass.Clip = new RectangleGeometry(new Rect(0, 0, w, h), 22, 22);
+        const double pad = 40;
+        BannerListBackdrop.Source = Frost.Behind(this, new Rect((Root.ActualWidth - w) / 2, top, w, h), pad);
+        BannerListBackdrop.Width = w + 2 * pad;
+        BannerListBackdrop.Height = h + 2 * pad;
+        BannerListBackdrop.Margin = new Thickness(-pad);
+
+        // the stack unfolds: every card starts tucked under the first one and slides down into its place
+        BannerList.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)));
+        for (int i = 0; i < _listItems.Count; i++)
+        {
+            if (BannerListItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
+            var y = new TranslateTransform(0, -i * (c.ActualHeight + 6) * 0.92);
+            var s = new ScaleTransform(1 - Math.Min(i, 3) * 0.04, 1);
+            c.RenderTransformOrigin = new Point(0.5, 0);
+            c.RenderTransform = new TransformGroup { Children = { s, y } };
+            c.Opacity = i < 3 ? 1 : 0;
+            Motion.To(y, TranslateTransform.YProperty, 0, 520, Motion.Spring(0.3), 60 + i * 55);
+            Motion.To(s, ScaleTransform.ScaleXProperty, 1, 480, Motion.Out, 60 + i * 55);
+            Motion.To(c, OpacityProperty, 1, 300, null, 60 + i * 55);
+        }
+        _listOpen = true;
+        _listClose.Stop();
+        _listClose.Interval = TimeSpan.FromSeconds(12);   // closes by itself if you never look at it
+        _listClose.Start();
+    }
+
+    private void CloseBannerList()
+    {
+        _listClose.Stop();
+        if (!_listOpen) return;
+        _listOpen = false;
+        // fold back up into a stack and fade
+        var n = _listItems.Count;
+        for (int i = 0; i < n; i++)
+        {
+            if (BannerListItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement c) continue;
+            var y = new TranslateTransform();
+            c.RenderTransform = y;
+            Motion.To(y, TranslateTransform.YProperty, -i * (c.ActualHeight + 6) * 0.92, 300, new QuadraticEase { EasingMode = EasingMode.EaseIn }, (n - i) * 25);
+        }
+        Motion.To(BannerList, OpacityProperty, 0, 260, null, 140, done: () => { if (!_listOpen) BannerList.Visibility = Visibility.Collapsed; });
+    }
+
+    private void BannerList_MouseEnter(object sender, MouseEventArgs e) => _listClose.Stop();
+
+    private void BannerList_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _listClose.Stop();
+        _listClose.Interval = TimeSpan.FromMilliseconds(1400);
+        _listClose.Start();
+    }
+
+    private void BannerListClose_Click(object sender, RoutedEventArgs e) => CloseBannerList();
+
+    private void BannerListClear_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var it in _listItems) _history.Remove(it);
+        UpdateNotifsState();
+        var i = 0;
+        foreach (var c in Enumerable.Range(0, _listItems.Count).Select(k => BannerListItems.ItemContainerGenerator.ContainerFromIndex(k)).OfType<FrameworkElement>())
+        {
+            var t = new TranslateTransform();
+            c.RenderTransform = t;
+            Motion.To(t, TranslateTransform.XProperty, 420, 300, new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseIn }, i * 45);
+            i++;
+        }
+        var done = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260 + i * 45) };
+        done.Tick += (_, _) => { done.Stop(); CloseBannerList(); };
+        done.Start();
+    }
+
+    // =======================================================================
+    //  To-do list with reminders
+    // =======================================================================
+    private readonly TodoService _todo = new();
+    private DateTime? _chipDue;
+
+    private void UpdateTodoState()
+    {
+        TodoEmpty.Visibility = _todo.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var dueSoon = _todo.Items.Count(t => !t.Done && t.Due is { } d && d.Date <= DateTime.Today);
+        TodoBadge.Visibility = dueSoon > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void TodoBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        TodoHint.Visibility = TodoBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateTodoPreview();
+    }
+
+    private void UpdateTodoPreview()
+    {
+        var (_, parsed) = TodoService.Parse(TodoBox.Text);
+        var due = parsed ?? _chipDue;
+        TodoDuePreview.Visibility = due != null ? Visibility.Visible : Visibility.Collapsed;
+        if (due != null) TodoDueText.Text = "⏰ " + new TodoItem { Due = due }.DueText;
+    }
+
+    private void TodoBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { e.Handled = true; AddTodo(); }
+        else if (e.Key == Key.Escape) { e.Handled = true; StopTyping(); }
+    }
+
+    private void TodoAdd_Click(object sender, RoutedEventArgs e) => AddTodo();
+
+    private void AddTodo()
+    {
+        var (text, parsed) = TodoService.Parse(TodoBox.Text);
+        if (text.Length == 0) return;
+        var item = _todo.Add(text, parsed ?? _chipDue);
+        TodoBox.Text = "";
+        _chipDue = null;
+        UpdateTodoPreview();
+        UpdateTodoState();
+        Eyes.Express(EyeMood.Happy, 1200);
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (TodoList.ItemContainerGenerator.ContainerFromItem(item) is FrameworkElement c)
+            {
+                var s = new ScaleTransform(0.9, 0.9);
+                c.RenderTransformOrigin = new Point(0.5, 0.5);
+                c.RenderTransform = s;
+                Motion.Pop(s, 0.85, 1, 480, 0.5);
+                c.Opacity = 0;
+                Motion.To(c, OpacityProperty, 1, 260);
+            }
+        });
+    }
+
+    private void TodoChip_Click(object sender, RoutedEventArgs e)
+    {
+        var now = DateTime.Now;
+        _chipDue = ((FrameworkElement)sender).Tag as string switch
+        {
+            "15m" => now.AddMinutes(15),
+            "1h" => now.AddHours(1),
+            "tonight" => DateTime.Today.AddHours(20) > now ? DateTime.Today.AddHours(20) : now.AddMinutes(30),
+            "tomorrow" => DateTime.Today.AddDays(1).AddHours(9),
+            _ => null,
+        };
+        UpdateTodoPreview();
+        Motion.Pop(new ScaleTransform(), 0.9, 1);
+        StartTyping(TodoBox);
+    }
+
+    private void TodoCheck_Click(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not TodoItem t) return;
+        if (((FrameworkElement)sender).RenderTransform is ScaleTransform s) Motion.Pop(s, 0.6, 1, 420, 0.7);
+        var wasDone = t.Done;
+        var delay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(wasDone ? 0 : 380) };
+        t.Done = !t.Done;   // tick shows at once, the list re-sorts a moment later
+        delay.Tick += (_, _) => { delay.Stop(); _todo.Sort(); _todo.Save(); UpdateTodoState(); };
+        delay.Start();
+        if (!wasDone) Eyes.Express(EyeMood.Happy, 1200);
+    }
+
+    private void TodoDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is TodoItem t) { _todo.Remove(t); UpdateTodoState(); }
+    }
+
+    /// <summary>Checks for reminders that are due and drops a banner for each.</summary>
+    private void CheckReminders()
+    {
+        foreach (var t in _todo.DueNow())
+        {
+            App.Log("reminder: " + t.Text);
+            Eyes.Jump(1.25);
+            Eyes.Express(EyeMood.Surprised, 900);
+            ShowNotif(new NotifData("Reminder", t.Text, $"Due {t.Due:HH:mm}  ·  from your to-do list", null, "", null, Color.FromRgb(0xFF, 0x9F, 0x0A), t));
+            SayLater("Reminder! ⏰", 7000, 2000);
+        }
+        UpdateTodoState();
     }
 
     private void OpenChatFromBanner(ChatThread chat)
@@ -1210,6 +1561,7 @@ public partial class NotchWindow : Window
     private void BannerReply_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
+        if (_notif?.Todo is { } todo) { if (!todo.Done) _todo.Toggle(todo); UpdateTodoState(); Eyes.Express(EyeMood.Happy, 1200); NextNotif(); return; }
         if (_notif?.Chat is { } c) OpenChatFromBanner(c);
     }
 
@@ -1218,6 +1570,7 @@ public partial class NotchWindow : Window
         e.Handled = true;
         var d = _notif;
         if (d == null) return;
+        if (d.Todo is { } todo) { _todo.Snooze(todo, TimeSpan.FromMinutes(10)); NextNotif(); return; }
         if (d.Chat != null) ChatService.OpenApp(d.App);
         else if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
         NextNotif();
@@ -1278,7 +1631,7 @@ public partial class NotchWindow : Window
             }
         }
         if (live != null) LiveTime.Text = live.Elapsed;
-        var line = live == null ? null : $"{live.App}  ·  {(live.Detail.Length > 0 ? live.Detail : "working…")}";
+        var line = live == null || !_settings.LiveInPill ? null : $"{live.App}  ·  {(live.Detail.Length > 0 ? live.Detail : "working…")}";
         if (line != _activityLine)
         {
             _activityLine = line;
@@ -1580,6 +1933,8 @@ public partial class NotchWindow : Window
         if (_tick % 8 == 4) _activity.Refresh();
         if (_tick % 4 == 0) { _activity.Tick(); UpdateLive(); MaybeChatter(); }
         if (_tick % 20 == 10) MaybeStandby();
+        if (_tick % 8 == 2) RefreshPillFrost();
+        if (_tick % 4 == 1 && !_intro && App.SnapshotDir == null) CheckReminders();
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -1790,23 +2145,50 @@ public partial class NotchWindow : Window
         });
     }
 
+    // =======================================================================
+    //  The small pill floats just below the top edge, on the same frosted, music-tinted glass as the open notch
+    // =======================================================================
+    private const double PillFloat = 6;
+
+    private void EnterFloatingPill(int ms)
+    {
+        Motion.To(_hostY, TranslateTransform.YProperty, PillFloat, ms, Motion.Spring(0.25));
+        Motion.To(this, NotchTopRadiusProperty, CollapsedRadius, ms, Motion.Out);
+        Motion.To(EarL, OpacityProperty, 0, 200);
+        Motion.To(EarR, OpacityProperty, 0, 200);
+        Motion.To(Ambient, OpacityProperty, 1, ms);
+        Motion.To(Rim, OpacityProperty, 0.8, ms);
+        Motion.To(NotchShadow, OpacityProperty, 0.55, ms);
+        RefreshPillFrost();
+    }
+
+    /// <summary>Re-takes the blurred picture behind the small pill (cheap: a small strip at the top of the screen).</summary>
+    private void RefreshPillFrost()
+    {
+        if (_mode != Mode.Collapsed || _intro || App.SnapshotDir != null || NotchHost.Opacity < 0.5) return;
+        const double pad = 30;
+        var w = CollapsedWTicker + 30;
+        var area = new Rect((Root.ActualWidth - w) / 2, PillFloat, w, CollapsedH + TickerH + 6);
+        var shot = Frost.Behind(this, area, pad);
+        if (shot == null) return;
+        FrostImage.Source = shot;
+        FrostImage.Width = w + 2 * pad;
+        FrostImage.Height = area.Height + 2 * pad;
+        FrostImage.Margin = new Thickness(0, -pad, 0, 0);
+        FrostImage.BeginAnimation(OpacityProperty, null);
+        FrostImage.Opacity = 1;
+    }
+
     private void Collapse()
     {
         if (!Expanded || _countdown > 0 || _draggingOut) return;
         _mode = Mode.Collapsed;
         StopTyping();
         SetGlass(Mode.Collapsed);
-        // back up against the screen edge
-        Motion.To(_hostY, TranslateTransform.YProperty, 0, 420, Motion.Spring(0.25));
-        Motion.To(this, NotchTopRadiusProperty, 0, 360, Motion.Out);
-        Motion.To(EarL, OpacityProperty, 1, 380, Motion.Out, 120);
-        Motion.To(EarR, OpacityProperty, 1, 380, Motion.Out, 120);
-        Motion.To(FrostImage, OpacityProperty, 0, 220);
         Motion.Hide(ExpandedView, 130, blur: 12);
-        Motion.To(Ambient, OpacityProperty, 0, 220, done: () => { if (!Expanded) SetAmbientDrift(false); });
-        Motion.To(Rim, OpacityProperty, 0, 200);
-        Motion.To(NotchShadow, OpacityProperty, 0, 300);
+        SetAmbientDrift(false);
         Motion.To(NotchGlow, OpacityProperty, 0, 300);
+        EnterFloatingPill(420);
         CollapsedView.Opacity = 0;
         Motion.Show(CollapsedView, 260, 170, blur: 8);
         _targetW = _targetH = -1;
@@ -1875,9 +2257,8 @@ public partial class NotchWindow : Window
         SetGlass(Mode.Collapsed);
         if (_card != null) Motion.Hide(_card, 130, blur: 10);
         _card = null;
-        Motion.To(Rim, OpacityProperty, 0, 200);
-        Motion.To(NotchShadow, OpacityProperty, 0, 250);
         Motion.To(NotchGlow, OpacityProperty, 0, 250);
+        EnterFloatingPill(360);
         CollapsedView.Opacity = 0;
         Motion.Show(CollapsedView, 260, 150, blur: 8);
         _targetW = _targetH = -1;
@@ -1886,7 +2267,7 @@ public partial class NotchWindow : Window
 
     /// <summary>The media tab grows taller when the lyrics stage is showing.</summary>
     private double ExpandedHeight =>
-        _tabIndex is 4 or 5 or 6 ? ExpandedHChat
+        _tabIndex is >= 4 and <= 8 ? ExpandedHChat
         : _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null ? ExpandedHLyrics : ExpandedH;
 
     private void ApplyCollapsed(bool animate)
@@ -1925,7 +2306,7 @@ public partial class NotchWindow : Window
         if (playing != _eyesDancing) { _eyesDancing = playing; Eyes.SetDancing(playing); }
 
         // live activity takes over the pill while something works (music still wins)
-        var live = _live != null && !playing && !_hudShown;
+        var live = _settings.LiveInPill && _live != null && !playing && !_hudShown;
         SetLiveMode(live);
 
         var w = _hudShown ? Math.Max(HudW, showTicker ? CollapsedWTicker : 0)
@@ -2321,8 +2702,8 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Tabs: sliding glass indicator + directional panel transitions
     // =======================================================================
-    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel, ChatsPanel, SearchPanel, ActivityPanel };
-    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower, TabChats, TabSearch, TabActivity };
+    private FrameworkElement[] Panels => new FrameworkElement[] { MediaPanel, AppsPanel, ShelfPanel, PowerPanel, ChatsPanel, SearchPanel, ActivityPanel, NotifsPanel, TodoPanel };
+    private RadioButton[] Tabs => new[] { TabMedia, TabApps, TabShelf, TabPower, TabChats, TabSearch, TabActivity, TabNotifs, TabTodo };
 
     private void Tab_Checked(object sender, RoutedEventArgs e)
     {
@@ -2344,6 +2725,8 @@ public partial class NotchWindow : Window
 
         if (idx == 1) RefreshApps(forceStagger: true);
         if (idx == 4) UpdateChatsState();
+        if (idx == 7) { NotifsBadge.Visibility = Visibility.Collapsed; foreach (var n in _history) n.Touch(); UpdateNotifsState(); }
+        if (idx == 8) { foreach (var ti in _todo.Items) ti.Touch(); UpdateTodoState(); }
         if (idx == 6) { _activity.Refresh(); Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Stagger(ActivityList)); }
         if (idx == 5) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => StartTyping(SearchBox));
         if (idx == 0) UpdateMediaPanel(false);

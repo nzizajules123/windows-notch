@@ -70,6 +70,23 @@ title and a two-line message. Hover it for the **✕** in its corner and the **R
 hover it never closes. Notifications that arrive together stack ("+2", with a card peeking out underneath). When it's
 done, the card shrinks back into a droplet that rises into the notch.
 
+With more than one waiting, the stack shows a **View all · N** badge. Click it and, like on an iPhone, the stack unfolds
+into a scrolling frosted list: each card slides down out of the pile into its own place. **Show less** (or moving the
+mouse away) folds it back up; **Clear** swipes them all away. Every notification is also kept in the **Alerts** tab,
+even ones that arrive while the notch is open.
+
+### To-do and reminders
+
+The **To-do** tab is a quick task list with reminders. Type in plain words: "call mom at 5pm", "stretch in 20 min",
+"pay rent tomorrow", "17:30 stand-up". The time is picked up and shown before you press Enter, or tap a chip
+(+15 min, +1 hour, Tonight, Tomorrow 9:00). Due times are coloured (orange soon, red overdue). When a task is due, the
+eyes jump and a reminder banner drops from the notch with **Done** and **Snooze 10 min**. It stays up for 20 seconds.
+Tasks are saved in `%LOCALAPPDATA%\WindowsNotch\todo.json`.
+
+| View all | Reminder | Alerts tab | To-do |
+|---|---|---|---|
+| ![](docs/screenshots/1e4-viewall.png) | ![](docs/screenshots/1e5-reminder.png) | ![](docs/screenshots/16-alerts.png) | ![](docs/screenshots/17-todo.png) |
+
 The frosted glass is a heavily blurred picture of what's behind the card, taken as it appears, so it works on any
 Windows build. Windows' own blur draws a square box on some builds.
 
@@ -87,7 +104,7 @@ away. It never covers a fullscreen video. Turn the automatic clock off with the 
 
 ### Look
 
-The island is solid black while small and dark smoked glass when open, with smooth rounded corners. Gradients are kept to a
+When small, the island is a little floating frosted capsule showing just the time, the eyes and battery %; when open it is dark smoked glass, with smooth rounded corners. Gradients are kept to a
 minimum: flat colours, glass tiles and soft glows. (Windows' own blur can be tried with `"SystemBlur": true` in settings,
 but some Windows builds draw it as a square box.)
 
@@ -101,6 +118,9 @@ but some Windows builds draw it as a square box.)
 | Idle | Happy | Volume | Wi-Fi | Notification |
 |---|---|---|---|---|
 | ![](docs/screenshots/1-collapsed.png) | ![](docs/screenshots/1b-eyes-happy.png) | ![](docs/screenshots/1c-hud-volume.png) | ![](docs/screenshots/1d-hud-wifi.png) | ![](docs/screenshots/1e-notification.png) |
+
+Running jobs (Claude Code, terminal builds…) are listed in the **Activity** tab. They only show in the small pill if
+you turn on **Show in pill** there.
 
 Expanded tabs:
 
