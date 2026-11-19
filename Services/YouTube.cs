@@ -62,7 +62,7 @@ public static class YouTubeSearch
 
     private static HttpClient CreateClient()
     {
-        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        var c = new HttpClient(new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All }) { Timeout = TimeSpan.FromSeconds(10) };
         c.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36");
         c.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.8");
         return c;
@@ -70,7 +70,26 @@ public static class YouTubeSearch
 
     public static async Task<List<YtResult>> SearchAsync(string query, int max = 12)
     {
-        var html = await Http.GetStringAsync("https://www.youtube.com/results?search_query=" + Uri.EscapeDataString(query) + "&sp=EgIQAQ%253D%253D");
+        var q = Uri.EscapeDataString(query);
+        // "videos only" filter first; if YouTube serves a layout we can't read, try the plain results page
+        foreach (var url in new[] { $"https://www.youtube.com/results?search_query={q}&sp=EgIQAQ%253D%253D", $"https://www.youtube.com/results?search_query={q}" })
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    var list = Parse(await Http.GetStringAsync(url), max);
+                    if (list.Count > 0) return list;
+                    App.Log($"youtube search: 0 results from {(url.Contains("&sp=") ? "filtered" : "plain")} page (try {attempt + 1})");
+                }
+                catch (Exception ex) when (attempt == 0) { App.Log("youtube search retry: " + ex.Message); }
+            }
+        }
+        return new();
+    }
+
+    private static List<YtResult> Parse(string html, int max)
+    {
         var start = html.IndexOf("var ytInitialData = ", StringComparison.Ordinal);
         if (start < 0) start = html.IndexOf("ytInitialData = ", StringComparison.Ordinal);
         if (start < 0) return new();
@@ -81,6 +100,25 @@ public static class YouTubeSearch
         var list = new List<YtResult>();
         Walk(doc.RootElement, list, max);
         return list;
+    }
+
+    /// <summary>Video length: "lengthText", else the time badge on the thumbnail. "LIVE" / none → live stream.</summary>
+    private static string LengthOf(JsonElement v)
+    {
+        if (v.TryGetProperty("lengthText", out var l))
+        {
+            if (l.TryGetProperty("simpleText", out var s)) return s.GetString() ?? "";
+            if (l.TryGetProperty("runs", out var r) && r.GetArrayLength() > 0 && r[0].TryGetProperty("text", out var rt)) return rt.GetString() ?? "";
+        }
+        if (v.TryGetProperty("thumbnailOverlays", out var ov) && ov.ValueKind == JsonValueKind.Array)
+            foreach (var o in ov.EnumerateArray())
+                if (o.TryGetProperty("thumbnailOverlayTimeStatusRenderer", out var ts))
+                {
+                    if (ts.TryGetProperty("style", out var st) && st.GetString() == "LIVE") return "";
+                    var txt = Runs(ts, "text");
+                    if (txt.Length > 0 && char.IsDigit(txt[0])) return txt;
+                }
+        return "";
     }
 
     private static void Walk(JsonElement e, List<YtResult> list, int max)
@@ -95,7 +133,7 @@ public static class YouTubeSearch
                     Id = id.GetString() ?? "",
                     Title = Runs(v, "title"),
                     Channel = Runs(v, "ownerText") is { Length: > 0 } o ? o : Runs(v, "longBylineText"),
-                    Length = v.TryGetProperty("lengthText", out var l) && l.TryGetProperty("simpleText", out var s) ? s.GetString() ?? "" : "",
+                    Length = LengthOf(v),
                     ThumbUrl = $"https://i.ytimg.com/vi/{id.GetString()}/mqdefault.jpg",
                 };
                 if (r.Id.Length > 0 && r.Length.Length > 0 && list.All(x => x.Id != r.Id)) list.Add(r);   // skip live streams

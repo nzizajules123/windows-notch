@@ -260,7 +260,12 @@ public partial class NotchWindow : Window
         {
             var what = args[demo + 1];
             var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(9) };
-            t.Tick += (_, _) => { t.Stop(); if (what == "expand") Expand(); else if (what == "standby") ShowStandby(); };
+            t.Tick += async (_, _) =>
+            {
+                t.Stop();
+                if (what == "expand") Expand();
+                else if (what == "standby") ShowStandby();
+            };
             t.Start();
         }
 
@@ -934,7 +939,7 @@ public partial class NotchWindow : Window
     /// <summary>Shows a little speech bubble under the pill; the eyes glance down at it.</summary>
     private void Say(string text, int ms = 2600)
     {
-        if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro || _bannerOpen || _standby != null) return;
+        if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro || _bannerOpen || _standby != null || _eyesHidden) return;
         BubbleText.Text = text;
         Bubble.Margin = new Thickness(0, Notch.ActualHeight + 3, 0, 0);
         Bubble.Visibility = Visibility.Visible;
@@ -2270,6 +2275,24 @@ public partial class NotchWindow : Window
         _tabIndex is >= 4 and <= 8 ? ExpandedHChat
         : _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null ? ExpandedHLyrics : ExpandedH;
 
+    private bool _eyesHidden;
+
+    private void SetEyesHidden(bool hide)
+    {
+        if (hide == _eyesHidden) return;
+        _eyesHidden = hide;
+        if (hide)
+        {
+            HideBubble();
+            Motion.To(Eyes, OpacityProperty, 0, 220, done: () => { if (_eyesHidden) Eyes.Visibility = Visibility.Collapsed; });
+        }
+        else
+        {
+            Eyes.Visibility = Visibility.Visible;
+            Motion.To(Eyes, OpacityProperty, 1, 360, Motion.Out, 120);
+        }
+    }
+
     private void ApplyCollapsed(bool animate)
     {
         if (_mode != Mode.Collapsed || _intro) return;
@@ -2304,6 +2327,8 @@ public partial class NotchWindow : Window
 
         var playing = _media.Current?.IsPlaying == true;
         if (playing != _eyesDancing) { _eyesDancing = playing; Eyes.SetDancing(playing); }
+        // while music plays the pill is about the song: the eyes step aside, lyrics run underneath
+        SetEyesHidden(playing && !_hudShown);
 
         // live activity takes over the pill while something works (music still wins)
         var live = _settings.LiveInPill && _live != null && !playing && !_hudShown;

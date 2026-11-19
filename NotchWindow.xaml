@@ -733,7 +733,7 @@
                                                Margin="38,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                                     <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
                                              FontSize="13" Margin="34,0,40,0" VerticalAlignment="Center" PreviewMouseDown="TypingBox_MouseDown"
-                                             TextChanged="SearchBox_TextChanged" KeyDown="SearchBox_KeyDown" LostKeyboardFocus="TypingBox_LostFocus"/>
+                                             InputScope="Url" TextChanged="SearchBox_TextChanged" KeyDown="SearchBox_KeyDown" LostKeyboardFocus="TypingBox_LostFocus"/>
                                     <ui:EqualizerBars x:Name="SearchSpinner" BarHeight="12" BarWidth="2.5" HorizontalAlignment="Right" Margin="0,0,14,0" Visibility="Collapsed"/>
                                 </Grid>
                             </Border>
