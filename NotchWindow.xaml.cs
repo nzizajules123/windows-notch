@@ -141,6 +141,7 @@ public partial class NotchWindow : Window
         Eyes.Reaction += OnEyesReaction;
         _bubbleTimer.Tick += (_, _) => { if (!_voice.Speaking) HideBubble(); };
         InitVoice();
+        InitLive();
         _notifTick.Tick += (_, _) => OnNotifTick();
         TalkSwitch.IsChecked = _settings.EyesTalk;
         StandbySwitch.IsChecked = _settings.StandbyAfterMinutes > 0;
@@ -268,6 +269,8 @@ public partial class NotchWindow : Window
         // QA hook: --say "text"  (the eyes say it, out loud when the voice is on)
         var sayAt = Array.IndexOf(args, "--say");
         if (sayAt >= 0 && sayAt + 1 < args.Length) SayLater(args[sayAt + 1], 6000, 3000);
+        // QA hook: --talk  (starts a live conversation a few seconds after launch)
+        if (args.Contains("--talk")) { var tt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) }; tt.Tick += (_, _) => { tt.Stop(); ToggleLiveTalk(); }; tt.Start(); }
         var demo = Array.IndexOf(args, "--demo");
         if (demo >= 0 && demo + 1 < args.Length)
         {
@@ -606,6 +609,7 @@ public partial class NotchWindow : Window
         _gestures?.Dispose();
         _claps?.Dispose();
         _voice.Stop();
+        _talk.Stop("quit");
         _volume.Dispose();
         _brightness.Dispose();
         _notifications.Dispose();
@@ -955,8 +959,12 @@ public partial class NotchWindow : Window
     private readonly DispatcherTimer _bubbleTimer = new();
     // the eyes' voice (ElevenLabs / Windows) and the little bob while they speak
     private readonly VoiceService _voice = new();
+    // live spoken conversation with Gemini, and the caption it shows in the pill
+    private readonly LiveTalkService _talk = new();
+    private string? _liveLine;
     private readonly DispatcherTimer _talkBob = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private int _talkBobDir = 1;
+    private DateTime _voiceQuietUntil;
     private DateTime _lastHello = DateTime.MinValue, _lastSay = DateTime.MinValue, _nextChatter = DateTime.Now.AddMinutes(9);
     private static readonly Random Rng = new();
     private static string Pick(params string[] s) => s[Rng.Next(s.Length)];
@@ -979,7 +987,7 @@ public partial class NotchWindow : Window
     {
         if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro || _bannerOpen || _standby != null || _eyesHidden) return;
         // out loud too, unless music is playing (it would talk over your song)
-        if (speak && _settings.VoiceEnabled && _media.Current?.IsPlaying != true && App.SnapshotDir == null) _ = _voice.SpeakAsync(text);
+        if (speak && _settings.VoiceEnabled && _media.Current?.IsPlaying != true && !_talk.Active && App.SnapshotDir == null) _ = _voice.SpeakAsync(text);
         BubbleText.Text = text;
         Bubble.Margin = new Thickness(0, Notch.ActualHeight + 3, 0, 0);
         Bubble.Visibility = Visibility.Visible;
@@ -1102,12 +1110,16 @@ public partial class NotchWindow : Window
         src?.AddHook((IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled) =>
         {
             if (msg == 0x0312 && w.ToInt32() == HotkeyPrivacy) { handled = true; ShowStandby(manual: true); }   // WM_HOTKEY
+            if (msg == 0x0312 && w.ToInt32() == HotkeyTalk) { handled = true; ToggleLiveTalk(); }
             return IntPtr.Zero;
         });
         // MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P'
         if (!Native.RegisterHotKey(_hwnd, HotkeyPrivacy, 0x0002 | 0x0001 | 0x4000, 0x50))
             App.Log("privacy hotkey: Ctrl+Alt+P is taken by another app");
+        if (!Native.RegisterHotKey(_hwnd, HotkeyTalk, 0x0002 | 0x0001 | 0x4000, 0x54))   // Ctrl+Alt+T
+            App.Log("talk hotkey: Ctrl+Alt+T is taken by another app");
     }
+    private const int HotkeyTalk = 0x4E54;
 
     private void LivePillSwitch_Click(object sender, RoutedEventArgs e)
     {
@@ -2658,11 +2670,13 @@ public partial class NotchWindow : Window
                     1 => _countdown > 0 ? "👏  Clap again to cancel" : "👏  Clap again to lock",
                     2 => _countdown > 0 ? "👏👏  Cancelling…" : "👏👏  Locking…  (once more = restart)",
                     3 => _countdown > 0 ? "👏👏👏" : "👏👏👏  Restart…  (once more = voice)",
-                    _ => _settings.VoiceEnabled ? "👏👏👏👏  Voice off" : "👏👏👏👏  Voice on",
+                    _ => _talk.HasKey ? (_talk.Active ? "👏👏👏👏  Bye!" : "👏👏👏👏  Let's talk")
+                         : _settings.VoiceEnabled ? "👏👏👏👏  Voice off" : "👏👏👏👏  Voice on",
                 },
                 "Closed_Fist" => _countdown > 0 ? "✊  Hold to cancel" : "✊  Hold to lock",
                 _ => "🖐  Hold to restart",
             };
+        if (_talk.Active) return _liveLine ?? (_talk.State == LiveTalkService.TalkState.Connecting ? "🎙  Connecting…" : "🎙  Listening…");
         if (_settings.CaptionsEnabled && !string.IsNullOrWhiteSpace(_captionLine)) return _captionLine;
         if (LyricLine() is { Length: > 0 } l) { _tickerIsLyric = true; return l; }
         if (_activityLine != null) return _activityLine;
@@ -3364,6 +3378,9 @@ public partial class NotchWindow : Window
     {
         if (DateTime.UtcNow < _clapCooldown) return "cooldown";
         if (Native.IsSessionLocked()) return "locked";
+        // the notch's own voice comes out of the speakers: syllables can sound like claps
+        if (_talk.Active) return "live talk on";
+        if (_voice.Speaking || DateTime.UtcNow < _voiceQuietUntil) return "notch speaking";
         if (_media.Current?.IsPlaying == true) return "media playing";
         // nobody claps with a hand on the mouse: any input during the claps means it was typing or clicking
         if (Frost.IdleTime().TotalMilliseconds < spanMs + 500) return "keyboard/mouse in use";
@@ -3399,7 +3416,8 @@ public partial class NotchWindow : Window
         }
         else if (n == 4)
         {
-            SetVoice(!_settings.VoiceEnabled, announce: true);
+            if (_talk.HasKey) ToggleLiveTalk();
+            else SetVoice(!_settings.VoiceEnabled, announce: true);
         }
         else if (_countdown == 0)
         {
@@ -3428,6 +3446,7 @@ public partial class NotchWindow : Window
             else
             {
                 _talkBob.Stop();
+                _voiceQuietUntil = DateTime.UtcNow.AddSeconds(1.5);   // echoes fade before claps count again
                 _bubbleTimer.Interval = TimeSpan.FromMilliseconds(900);
                 _bubbleTimer.Stop();
                 _bubbleTimer.Start();
@@ -3462,23 +3481,114 @@ public partial class NotchWindow : Window
         else
         {
             _voice.Stop();
+        _talk.Stop("quit");
             if (announce) Say("Okay, I'll be quiet 🤫", 2200, speak: false);
         }
     }
 
     private void VoiceSwitch_Click(object sender, RoutedEventArgs e) => SetVoice(VoiceSwitch.IsChecked == true);
 
+    // =======================================================================
+    //  Live talk — a spoken conversation with the notch (Gemini Live API)
+    // =======================================================================
+    private void InitLive()
+    {
+        _talk.ApiKey = VoiceService.Unprotect(_settings.GeminiKey);
+        _talk.VoiceName = string.IsNullOrWhiteSpace(_settings.GeminiVoice) ? "Kore" : _settings.GeminiVoice;
+        _talk.StateChanged += (st, msg) => Dispatcher.BeginInvoke(() => OnLiveState(st, msg));
+        _talk.ModelText += t => Dispatcher.BeginInvoke(() => { _liveLine = "✨  " + Tail(t); RefreshLiveLine(); });
+        _talk.UserText += t => Dispatcher.BeginInvoke(() => { _liveLine = "🗣  " + Tail(t); RefreshLiveLine(); });
+        UpdateTalkUi();
+    }
+
+    /// <summary>The end of a long caption, so the newest words show in the pill.</summary>
+    private static string Tail(string t) => t.Length <= 70 ? t : "…" + t[^68..].TrimStart();
+
+    private void OnLiveState(LiveTalkService.TalkState st, string? msg)
+    {
+        App.Log($"live talk: {st}{(msg != null ? " — " + msg : "")}");
+        switch (st)
+        {
+            case LiveTalkService.TalkState.Speaking:
+                _talkBob.Start();
+                Eyes.Express(EyeMood.Happy, 1200);
+                break;
+            case LiveTalkService.TalkState.Listening:
+                _talkBob.Stop();
+                Eyes.Attend(0, 1.5, 1200);   // looking at you, listening
+                break;
+            case LiveTalkService.TalkState.Off:
+                _talkBob.Stop();
+                _liveLine = null;
+                if (msg != null) SayLater("⚠ " + msg, 400, 4000);
+                break;
+        }
+        UpdateTalkUi();
+        RefreshLiveLine();
+    }
+
+    private void UpdateTalkUi()
+    {
+        var on = _talk.Active;
+        TalkGlyph.Text = on ? "" : "";   // stop · microphone
+        TalkGlyph.Foreground = on ? new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A)) : (Brush)FindResource("Fg");
+        TalkButton.ToolTip = on ? "Stop talking (Ctrl+Alt+T · 4 claps)"
+            : _talk.HasKey ? "Talk with the notch (Gemini Live) — Ctrl+Alt+T · 4 claps"
+            : "Talk with the notch — add a Gemini API key first";
+    }
+
+    private async void ToggleLiveTalk()
+    {
+        if (_talk.Active) { _talk.Stop("you ended it"); return; }
+        if (!_talk.HasKey)
+        {
+            if (!OpenVoiceSetup() || !_talk.HasKey) return;
+            _settings.Save();
+        }
+        _voice.Stop();
+        if (Expanded) Collapse();
+        await _talk.StartAsync(LivePrompt());
+    }
+
+    private void TalkLive_Click(object sender, RoutedEventArgs e) => ToggleLiveTalk();
+
+    /// <summary>Who the notch is when it talks: a short, warm, playful companion at the top of the screen.</summary>
+    private string LivePrompt()
+    {
+        var now = DateTime.Now;
+        var media = _media.Current is { } m ? $" Right now \"{m.Title}\" by {m.Artist} is {(m.IsPlaying ? "playing" : "paused")}." : "";
+        var (pct, charging, has) = PowerService.Battery();
+        var battery = has ? $" The battery is at {pct}%{(charging ? " and charging" : "")}." : "";
+        return "You are Notch, a cute little island with living eyes that sits at the top of the user's Windows screen. " +
+               "You are their friendly companion: warm, playful, encouraging and a little funny. " +
+               "Speak naturally like a friend in a voice chat, and keep answers short (one to three sentences) unless asked for more. " +
+               "Reply in the language the user speaks. " +
+               $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}";
+    }
+
     private void VoiceChip_Click(object sender, RoutedEventArgs e)
     {
-        var w = new VoiceSetupWindow(_voice, VoiceService.Unprotect(_settings.VoiceKey), _settings.VoiceId);
-        if (w.ShowDialog() != true) return;
+        if (!OpenVoiceSetup()) return;
+        if (!_settings.VoiceEnabled) SetVoice(true);
+        UpdateVoiceUi();
+    }
+
+    /// <summary>The voice / live-talk setup dialog. Returns true when saved.</summary>
+    private bool OpenVoiceSetup()
+    {
+        var w = new VoiceSetupWindow(_voice, VoiceService.Unprotect(_settings.VoiceKey), _settings.VoiceId,
+                                     VoiceService.Unprotect(_settings.GeminiKey), _settings.GeminiVoice);
+        if (w.ShowDialog() != true) return false;
+        _settings.GeminiKey = VoiceService.Protect(w.GeminiKey);
+        _settings.GeminiVoice = w.GeminiVoice;
+        _talk.ApiKey = w.GeminiKey;
+        _talk.VoiceName = w.GeminiVoice;
         _settings.VoiceKey = VoiceService.Protect(w.ApiKey);
         _settings.VoiceId = string.IsNullOrWhiteSpace(w.VoiceId) ? VoiceService.DefaultVoiceId : w.VoiceId.Trim();
         _settings.Save();
         _voice.ApiKey = w.ApiKey;
         _voice.VoiceId = _settings.VoiceId;
-        if (!_settings.VoiceEnabled) SetVoice(true);
-        UpdateVoiceUi();
+        return true;
     }
 
     private void ClapChip_Click(object sender, RoutedEventArgs e)
@@ -3528,7 +3638,7 @@ public partial class NotchWindow : Window
         App.Log("session: " + e.Reason);
         Dispatcher.BeginInvoke(async () =>
         {
-            if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); _claps?.Stop(); SetHold(null); }
+            if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); _claps?.Stop(); _talk.Stop("locked"); SetHold(null); }
             if (e.Reason == SessionSwitchReason.SessionUnlock && _settings.ClapsEnabled)
             {
                 _clapCooldown = DateTime.UtcNow.AddSeconds(3);

@@ -21,6 +21,10 @@ public sealed class Settings
     public string? VoiceKey { get; set; }
     public string VoiceId { get; set; } = WindowsNotch.Services.VoiceService.DefaultVoiceId;
     public double VoiceVolume { get; set; } = 0.85;
+    /// <summary>Gemini API key for live voice talk, encrypted for this Windows account (DPAPI).</summary>
+    public string? GeminiKey { get; set; }
+    /// <summary>Gemini's voice for live talk (Kore, Puck, Aoede, Charon, Fenrir, Leda, Orus, Zephyr…).</summary>
+    public string GeminiVoice { get; set; } = "Kore";
     /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
     public int StandbyAfterMinutes { get; set; } = 5;
     /// <summary>Show "Claude is working…" style live activity in the small pill (off: only in the Activity tab).</summary>

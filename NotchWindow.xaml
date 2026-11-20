@@ -450,6 +450,11 @@
                                 </StackPanel>
                             </Grid>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <!-- live talk with Gemini: a spoken conversation with the notch -->
+                                <Button x:Name="TalkButton" Style="{StaticResource ChipButton}" Margin="0,0,6,0" Width="30" Height="28" Padding="0" Click="TalkLive_Click"
+                                        ToolTip="Talk with the notch (Gemini Live) — Ctrl+Alt+T · 4 claps">
+                                    <TextBlock x:Name="TalkGlyph" Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="12.5" Foreground="{StaticResource Fg}" VerticalAlignment="Center"/>
+                                </Button>
                                 <!-- privacy screen: blur everything behind the big clock, right now -->
                                 <Button x:Name="PrivacyButton" Style="{StaticResource ChipButton}" Margin="0,0,10,0" Width="30" Height="28" Padding="0" Click="StandbyNow_Click"
                                         ToolTip="Privacy screen — blur everything behind a big clock (Ctrl+Alt+P)">

@@ -15,16 +15,20 @@ public sealed class VoiceSetupWindow : Window
     private readonly VoiceService _voice;
     private readonly PasswordBox _key = new();
     private readonly TextBox _voiceId = new();
+    private readonly PasswordBox _gemKey = new();
+    private readonly TextBox _gemVoice = new();
     private readonly TextBlock _status = new();
 
     public string? ApiKey { get; private set; }
     public string VoiceId { get; private set; } = VoiceService.DefaultVoiceId;
+    public string? GeminiKey { get; private set; }
+    public string GeminiVoice { get; private set; } = "Kore";
 
     private static readonly Brush Fg = Brushes.White;
     private static readonly Brush Dim = new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF));
     private static readonly Brush Field = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x31));
 
-    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId)
+    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId, string? geminiKey = null, string? geminiVoice = null)
     {
         _voice = voice;
         Title = "Notch voice";
@@ -56,6 +60,25 @@ public sealed class VoiceSetupWindow : Window
         _voiceId.Text = string.IsNullOrWhiteSpace(voiceId) ? VoiceService.DefaultVoiceId : voiceId;
         panel.Children.Add(_voiceId);
 
+        panel.Children.Add(new TextBlock
+        {
+            Text = "🎙  Live talk (Gemini)", FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = Fg, Margin = new Thickness(0, 18, 0, 0),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "A Gemini API key (aistudio.google.com → Get API key) lets you have a real spoken conversation with the notch: " +
+                   "click the mic in the header, press Ctrl+Alt+T, or clap four times.",
+            TextWrapping = TextWrapping.Wrap, Foreground = Dim, FontSize = 12, Margin = new Thickness(0, 4, 0, 6),
+        });
+        panel.Children.Add(Label("Gemini API key"));
+        StyleField(_gemKey);
+        _gemKey.Password = geminiKey ?? "";
+        panel.Children.Add(_gemKey);
+        panel.Children.Add(Label("Gemini voice  (Kore, Puck, Aoede, Charon, Fenrir, Leda, Orus, Zephyr…)"));
+        StyleField(_gemVoice);
+        _gemVoice.Text = string.IsNullOrWhiteSpace(geminiVoice) ? "Kore" : geminiVoice;
+        panel.Children.Add(_gemVoice);
+
         _status.Foreground = Dim; _status.FontSize = 12; _status.TextWrapping = TextWrapping.Wrap; _status.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(_status);
 
@@ -73,6 +96,8 @@ public sealed class VoiceSetupWindow : Window
         {
             ApiKey = string.IsNullOrWhiteSpace(_key.Password) ? null : _key.Password.Trim();
             VoiceId = _voiceId.Text.Trim();
+            GeminiKey = string.IsNullOrWhiteSpace(_gemKey.Password) ? null : _gemKey.Password.Trim();
+            GeminiVoice = string.IsNullOrWhiteSpace(_gemVoice.Text) ? "Kore" : _gemVoice.Text.Trim();
             DialogResult = true;
             return Task.CompletedTask;
         }));

@@ -144,6 +144,20 @@ messages. **Four claps 👏👏👏👏** switch the voice on or off (with Claps
 - Each phrase is made once and kept in `%APPDATA%\WindowsNotch\voice`, so the usual lines use ElevenLabs credits only the first time.
 - It stays quiet while music plays, so it never talks over your song.
 
+### Talk with the notch 🎙 (Gemini Live)
+
+A real spoken conversation: click the **mic** in the header, press **Ctrl+Alt+T**, or **clap four times**. The notch
+greets you, and you just talk.
+- **How it answers:** Gemini listens, answers out loud in its own voice (Kore by default; Puck, Aoede, Charon and others
+  in the setup), and notices when you stop speaking.
+- **Captions:** both sides are captioned live in the pill (🗣 you, ✨ the notch), and the eyes bob while it speaks.
+- **Ending it:** click the stop button or press Ctrl+Alt+T again. It also ends by itself after about a minute of
+  silence, or when the PC locks.
+- **Echo:** while it speaks, your mic is muted, so it never hears and answers itself through the speakers. Claps are
+  ignored while the notch is talking.
+- **Setup:** add a Gemini API key from aistudio.google.com in the voice setup (the voice chip in Control). It's stored
+  encrypted on this PC only. With a Gemini key, four claps start and stop the conversation; without one, they switch
+  the speaking voice on and off.
 ### Lyrics on the lock screen
 
 When a song with synced lyrics plays, the big-clock lock / privacy screen shows the lyrics in the middle: the line being

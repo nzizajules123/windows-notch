@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace WindowsNotch.Services;
 
@@ -13,7 +13,7 @@ public sealed class ClapAnalyzer
 {
     public const int Rate = 16000;
     private const int Frame = Rate / 100;          // 10 ms frames
-    public const int MinGapMs = 120, MaxGapMs = 750, EndGapMs = 800;
+    public const int MinGapMs = 170, MaxGapMs = 750, EndGapMs = 800;
 
     /// <summary>A clap was heard; the argument is how many claps the sequence has so far.</summary>
     public event Action<int>? Clap;
