@@ -49,6 +49,12 @@ data class Geo(
  */
 class IslandService : AccessibilityService() {
 
+    companion object {
+        /** The running service: clap control locks the phone through it. */
+        @Volatile var instance: IslandService? = null
+            private set
+    }
+
     private var view: android.view.View? = null
     private var params: WindowManager.LayoutParams? = null
     private val owner = OverlayOwner()
@@ -79,6 +85,8 @@ class IslandService : AccessibilityService() {
         addOverlay()
         registerReceivers()
         Island.overlayRunning = true
+        instance = this
+        ClapService.sync(this)
         // while a text field in the island is focused, the window must accept the keyboard
         owner.lifecycleScope.launch {
             snapshotFlow { Island.typing }.collect { typing -> setFocusable(typing) }
@@ -100,6 +108,7 @@ class IslandService : AccessibilityService() {
 
     override fun onDestroy() {
         Island.overlayRunning = false
+        instance = null
         runCatching { unregisterReceiver(receiver) }
         view?.let { runCatching { wm.removeView(it) } }
         view = null

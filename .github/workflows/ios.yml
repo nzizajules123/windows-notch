@@ -1,0 +1,47 @@
+name: iOS build
+
+# Builds the iPhone app (Notch Island) on a GitHub Mac and produces an unsigned .ipa.
+# Install it with AltStore or Sideloadly, which sign it with your own Apple ID.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -version
+          xcodebuild -project NotchIsland.xcodeproj -scheme NotchIsland -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build > build.log 2>&1 || { grep -E "error:" build.log | sort -u | head -60; tail -40 build.log; exit 1; }
+          grep -E "warning:.*\.swift" build.log | sort -u | head -30 || true
+          tail -5 build.log
+
+      - name: Package the .ipa
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/NotchIsland.app Payload/
+          ls Payload/NotchIsland.app/PlugIns
+          zip -qry NotchIsland-unsigned.ipa Payload
+          ls -la NotchIsland-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NotchIsland-ipa
+          path: ios/NotchIsland-unsigned.ipa

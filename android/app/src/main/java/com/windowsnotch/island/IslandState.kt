@@ -130,6 +130,12 @@ object Island {
         speechId++
     }
 
+    /** A short status bubble that shows even when "Eyes talk" is off (e.g. clap feedback). */
+    fun hint(text: String) {
+        speech = text
+        speechId++
+    }
+
     fun pick(vararg s: String) = s.random()
 
     fun greeting(): String {

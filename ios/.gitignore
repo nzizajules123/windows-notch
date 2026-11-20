@@ -1,0 +1,7 @@
+build/
+Payload/
+*.ipa
+*.xcodeproj/
+build.log
+NotchIsland/Info.plist
+NotchIslandWidget/Info.plist

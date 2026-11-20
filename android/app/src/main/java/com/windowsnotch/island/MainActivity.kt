@@ -48,6 +48,27 @@ class MainActivity : ComponentActivity() {
 
     private var overlayOn by mutableStateOf(false)
     private var listenerOn by mutableStateOf(false)
+    private var clapsOn by mutableStateOf(false)
+
+    /** Asks for the microphone (and, on Android 13+, the small "listening" notification), then starts listening. */
+    private val askMic = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        val ok = res[android.Manifest.permission.RECORD_AUDIO] == true || ClapService.hasMic(this)
+        setClaps(ok)
+        if (!ok) android.widget.Toast.makeText(this, "Clap control needs the microphone", android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    private fun setClaps(on: Boolean) {
+        clapsOn = on
+        getSharedPreferences("island", MODE_PRIVATE).edit().putBoolean("claps", on).apply()
+        ClapService.sync(this)
+    }
+
+    private fun toggleClaps(on: Boolean) {
+        if (!on || ClapService.hasMic(this)) { setClaps(on); return }
+        val perms = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
+        if (android.os.Build.VERSION.SDK_INT >= 33) perms += android.Manifest.permission.POST_NOTIFICATIONS
+        askMic.launch(perms.toTypedArray())
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +87,8 @@ class MainActivity : ComponentActivity() {
                 lyrics = Island.lyricsEnabled,
                 setLyrics = { Island.lyricsEnabled = it; prefs.edit().putBoolean("lyrics", it).apply() },
                 setTalk = { prefs.edit().putBoolean("talk", it).apply() },
+                claps = clapsOn,
+                setClaps = ::toggleClaps,
             )
         }
     }
@@ -75,6 +98,8 @@ class MainActivity : ComponentActivity() {
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
         overlayOn = enabled.split(':').any { ComponentName.unflattenFromString(it)?.packageName == packageName }
         listenerOn = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        clapsOn = getSharedPreferences("island", MODE_PRIVATE).getBoolean("claps", false) && ClapService.hasMic(this)
+        ClapService.sync(this)   // (re)start listening while the app is in front: Android allows the microphone from here
     }
 }
 
@@ -91,6 +116,7 @@ private fun Setup(
     openAccessibility: () -> Unit, openListener: () -> Unit, openAppInfo: () -> Unit,
     lyrics: Boolean, setLyrics: (Boolean) -> Unit,
     setTalk: (Boolean) -> Unit,
+    claps: Boolean, setClaps: (Boolean) -> Unit,
 ) {
     var lyricsOn by androidx.compose.runtime.remember { mutableStateOf(lyrics) }
     Column(
@@ -129,6 +155,14 @@ private fun Setup(
             Switch(talkOn, {
                 talkOn = it; Island.talk = it; setTalk(it)
             }, colors = SwitchDefaults.colors(checkedTrackColor = Green))
+        }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Clap control 👏", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Clap twice to lock the phone, three times for the power menu. Uses the microphone; ignored while music plays, during calls and when locked. Nothing is recorded.", color = Dim, fontSize = 12.5.sp)
+                if (claps && !overlayOn) Text("Turn on the island (step 1) so claps can lock the phone.", color = Color(0xFFFF9F0A), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            Switch(claps, setClaps, colors = SwitchDefaults.colors(checkedTrackColor = Green))
         }
         Spacer(Modifier.height(8.dp))
         Text("Tap the island to open it · tap outside to close · the eyes react to notifications, volume and your charger.", color = Faint, fontSize = 12.sp)

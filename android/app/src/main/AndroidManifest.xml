@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- clap control: listens for claps (analysed live, never recorded) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -34,6 +39,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/island_accessibility" />
         </service>
+
+        <!-- clap control: 👏👏 lock, 👏👏👏 power menu -->
+        <service
+            android:name=".ClapService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- now-playing media sessions + notifications -->
         <service
