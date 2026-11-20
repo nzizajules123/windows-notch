@@ -167,6 +167,18 @@ Check your camera's picture quality with `python python/camera_probe.py` (lower 
 Grab `WindowsNotch-v*-win-x64.zip` from the [Releases](../../releases) page, unzip it anywhere and run `WindowsNotch.exe`.
 It's self-contained: no .NET install needed.
 
+### Automatic updates
+
+The notch keeps itself up to date. 90 seconds after it starts (then every 6 hours) it looks for a newer release on
+GitHub, downloads it, and checks it against the SHA-256 fingerprint GitHub publishes for that file. A banner says
+**Update ready** with an **Update now** button; otherwise it installs by itself the next time you're away (3 minutes
+idle, nothing playing): the island retracts, the new files are copied in, and it comes back on the new version with an
+**Updated to vX ✨** banner. Your settings, shelf and to-dos are kept.
+
+**Control → Auto-update** turns the automatic part off; the chip next to it shows your version and checks or installs on
+click. A copy that can't replace its own files (in a protected folder like Program Files, or a developer build) just
+tells you a new version is out and links to the download.
+
 ## Android: Notch Island
 
 The same island for Android phones (Android 8+), in [`android/`](android): a pill around your front camera hole with

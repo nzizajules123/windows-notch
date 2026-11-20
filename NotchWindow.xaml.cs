@@ -196,6 +196,7 @@ public partial class NotchWindow : Window
         GestureSwitch.IsChecked = _settings.GesturesEnabled;
         PreviewChip.IsChecked = _settings.ShowCameraPreview;
         StartupSwitch.IsChecked = PowerService.StartsWithWindows;
+        InitUpdates();
 
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
@@ -1096,7 +1097,8 @@ public partial class NotchWindow : Window
     // =======================================================================
     //  Notifications: a macOS-style frosted banner that drops out of the notch
     // =======================================================================
-    public sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null, TodoItem? Todo = null);
+    public sealed record NotifData(string App, string Title, string Body, ImageSource? Icon, string Glyph, ChatThread? Chat, Color? Tint = null, TodoItem? Todo = null,
+        Action? Act = null, string? ActLabel = null);
 
     /// <summary>A notification as shown in the Alerts tab and the "View all" list.</summary>
     public sealed class NotifEntry : System.ComponentModel.INotifyPropertyChanged
@@ -1170,7 +1172,17 @@ public partial class NotchWindow : Window
         BannerGlyph.Visibility = d.Icon == null ? Visibility.Visible : Visibility.Collapsed;
         var tint = d.Tint ?? (d.Icon is System.Windows.Media.Imaging.BitmapSource b ? ColorUtil.Dominant(b) : _theme.Current);
         BannerTintStop.Color = AccentTheme.WithAlpha(tint, 0x48);
-        if (d.Todo != null)
+        if (d.Act != null)
+        {
+            // one clear action (e.g. "Update now"), always visible
+            BannerReply.Visibility = Visibility.Collapsed;
+            BannerOpenText.Text = d.ActLabel ?? "Open";
+            BannerActions.BeginAnimation(HeightProperty, null);
+            BannerActions.BeginAnimation(OpacityProperty, null);
+            BannerActions.Height = 34;
+            BannerActions.Opacity = 1;
+        }
+        else if (d.Todo != null)
         {
             // reminders: ✓ Done and Snooze, always visible
             BannerReply.Visibility = Visibility.Visible;
@@ -1210,7 +1222,7 @@ public partial class NotchWindow : Window
         BannerBackdrop.Height = h + 2 * pad;
         BannerBackdrop.Margin = new Thickness(-pad);   // bigger than the card, but must not change its size
 
-        _notifLeft = d.Todo != null ? 20000 : d.Chat != null ? 7500 : 5800;
+        _notifLeft = d.Todo != null ? 20000 : d.Act != null ? 15000 : d.Chat != null ? 7500 : 5800;
         _notifTick.Stop();
         _notifTick.Start();
 
@@ -1350,6 +1362,7 @@ public partial class NotchWindow : Window
     {
         CloseBannerList();
         if (d.Chat != null) { OpenChatFromBanner(d.Chat); return; }
+        if (d.Act is { } act) { CloseBanner(); act(); return; }
         if (d.Todo != null) { CloseBanner(instant: true); Expand(); Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => TabTodo.IsChecked = true); return; }
         if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
         CloseBanner();
@@ -1603,6 +1616,7 @@ public partial class NotchWindow : Window
         e.Handled = true;
         var d = _notif;
         if (d == null) return;
+        if (d.Act is { } act) { NextNotif(); act(); return; }
         if (d.Todo is { } todo) { _todo.Snooze(todo, TimeSpan.FromMinutes(10)); NextNotif(); return; }
         if (d.Chat != null) ChatService.OpenApp(d.App);
         else if (WindowFor(d.App) is { } h && h != IntPtr.Zero) AppsService.Focus(h);
@@ -1968,6 +1982,7 @@ public partial class NotchWindow : Window
         if (_tick % 20 == 10) MaybeStandby();
         if (_tick % 8 == 2) RefreshPillFrost();
         if (_tick % 4 == 1 && !_intro && App.SnapshotDir == null) CheckReminders();
+        if (_tick % 30 == 7 && !_intro && App.SnapshotDir == null) MaybeAutoInstall();
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -2303,7 +2318,7 @@ public partial class NotchWindow : Window
 
     /// <summary>The media tab grows taller when the lyrics stage is showing.</summary>
     private double ExpandedHeight =>
-        _tabIndex is >= 4 and <= 8 ? ExpandedHChat
+        _tabIndex is >= 3 and <= 8 ? ExpandedHChat
         : _tabIndex == 0 && LineBox.Visibility == Visibility.Visible && _media.Current != null ? ExpandedHLyrics : ExpandedH;
 
     private bool _eyesHidden;
@@ -3076,6 +3091,134 @@ public partial class NotchWindow : Window
             Cleanup();
             Application.Current.Shutdown();
         });
+    }
+
+    // =======================================================================
+    //  Updates: new GitHub releases download by themselves and install while you're away
+    // =======================================================================
+    private readonly UpdateService _updates = new();
+    private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromSeconds(90) };
+    private string? _announcedUpdate;
+
+    private void InitUpdates()
+    {
+        UpdateSwitch.IsChecked = _settings.AutoUpdate;
+        _updates.Changed += () => Dispatcher.BeginInvoke(OnUpdateChanged);
+        UpdateUpdateUi();
+        if (App.SnapshotDir != null) return;
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = TimeSpan.FromHours(6);   // first look 90 s after start, then every 6 hours
+            await _updates.CheckAsync(download: _settings.AutoUpdate);
+        };
+        _updateTimer.Start();
+
+        var args = Environment.GetCommandLineArgs();
+        // QA: check now and install as soon as it's downloaded
+        if (args.Contains("--update-now"))
+        {
+            _updates.Changed += () => Dispatcher.BeginInvoke(() => { if (_updates.State == UpdateState.Ready) InstallUpdate(); });
+            _ = _updates.CheckAsync(download: true);
+        }
+
+        // just updated → say so
+        var i = Array.IndexOf(args, "--updated");
+        if (i >= 0)
+        {
+            var tag = i + 1 < args.Length ? args[i + 1] : "v" + _updates.CurrentText;
+            App.Log($"update: now running {tag}");
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                ShowNotif(new NotifData("Windows Notch", $"Updated to {tag} ✨", "You're on the newest version", null, "", null, AccentTheme.Default,
+                    Act: () => OpenUrl(UpdateService.ReleasesPage), ActLabel: "What's new"));
+                Eyes.Express(EyeMood.Happy, 1600);
+            };
+            t.Start();
+        }
+    }
+
+    private void OnUpdateChanged()
+    {
+        UpdateUpdateUi();
+        var tag = _updates.NewTag;
+        if (tag == null || tag == _announcedUpdate) return;
+        if (_updates.State == UpdateState.Ready)
+        {
+            _announcedUpdate = tag;
+            ShowNotif(new NotifData("Windows Notch", $"Update ready · {tag}",
+                _settings.AutoUpdate ? "It installs by itself next time you step away — or now (takes a few seconds)" : "Install it now — takes a few seconds",
+                null, "", null, AccentTheme.Default, Act: InstallUpdate, ActLabel: "Update now"));
+        }
+        else if (_updates.State == UpdateState.Available && _settings.LastAnnouncedUpdate != tag)
+        {
+            // this copy can't replace itself (developer build or a protected folder): point to the download
+            _announcedUpdate = tag;
+            _settings.LastAnnouncedUpdate = tag;
+            _settings.Save();
+            ShowNotif(new NotifData("Windows Notch", $"{tag} is out", "Download the new version from GitHub", null, "", null, AccentTheme.Default,
+                Act: () => OpenUrl(UpdateService.ReleasesPage), ActLabel: "Download"));
+        }
+    }
+
+    private void UpdateUpdateUi()
+    {
+        UpdateChipText.Text = _updates.State switch
+        {
+            UpdateState.Checking => "Checking…",
+            UpdateState.Downloading => $"Downloading {(int)(_updates.Progress * 100)}%",
+            UpdateState.Ready => $"Update to {_updates.NewTag}",
+            UpdateState.Available => $"{_updates.NewTag} — download",
+            UpdateState.UpToDate => $"v{_updates.CurrentText} · up to date",
+            UpdateState.Failed => _updates.Error ?? "Update failed",
+            _ => $"v{_updates.CurrentText} · check updates",
+        };
+        UpdateChip.ToolTip = _updates.State switch
+        {
+            UpdateState.Ready => "Restart the notch on the new version now",
+            UpdateState.Available => "Open the download page",
+            _ => "Check GitHub for a new version",
+        };
+    }
+
+    private async void UpdateChip_Click(object sender, RoutedEventArgs e)
+    {
+        switch (_updates.State)
+        {
+            case UpdateState.Ready: InstallUpdate(); break;
+            case UpdateState.Available: OpenUrl(UpdateService.ReleasesPage); break;
+            default: await _updates.CheckAsync(download: true); break;
+        }
+    }
+
+    private void UpdateSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.AutoUpdate = UpdateSwitch.IsChecked == true;
+        _settings.Save();
+    }
+
+    /// <summary>While you're away (3 min idle, nothing playing, notch closed) a downloaded update installs by itself.</summary>
+    private void MaybeAutoInstall()
+    {
+        if (!_settings.AutoUpdate || _updates.State != UpdateState.Ready) return;
+        if (_mode != Mode.Collapsed || _countdown > 0 || _typing || _media.Current?.IsPlaying == true) return;
+        if (Frost.IdleTime() < TimeSpan.FromMinutes(3)) return;
+        App.Log("update: installing while idle");
+        InstallUpdate();
+    }
+
+    private void InstallUpdate()
+    {
+        if (!_updates.Install()) { OpenUrl(UpdateService.ReleasesPage); return; }
+        _standby?.Dismiss("update");
+        Quit_Click(this, new RoutedEventArgs());   // the island retracts and the new version comes back up
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { App.Log(ex); }
     }
 
     // =======================================================================

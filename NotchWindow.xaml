@@ -1202,6 +1202,16 @@
                                             <TextBlock Text="Privacy screen" FontSize="11"/>
                                         </Button>
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <CheckBox x:Name="UpdateSwitch" Style="{StaticResource Switch}" Click="UpdateSwitch_Click"
+                                                  ToolTip="Download new versions by themselves and install them while you're away"/>
+                                        <Button x:Name="UpdateChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="UpdateChip_Click" ToolTip="Check for a new version">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock x:Name="UpdateGlyph" Style="{StaticResource Glyph}" Text="&#xE895;" FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="UpdateChipText" Text="Updates" FontSize="11" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
                                     <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Padding="10,4" Margin="0,6,0,0" Click="Quit_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>

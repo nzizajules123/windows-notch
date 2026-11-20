@@ -33,6 +33,11 @@ public sealed class Settings
     /// <summary>Seconds after the mouse leaves before the expanded notch closes.</summary>
     public double CollapseDelaySec { get; set; } = 3;
 
+    /// <summary>Download new versions from GitHub by themselves and install them when you're away.</summary>
+    public bool AutoUpdate { get; set; } = true;
+    /// <summary>Last release we pointed a non-updatable copy to (so it's only announced once).</summary>
+    public string? LastAnnouncedUpdate { get; set; }
+
     public bool LyricsEnabled { get; set; } = true;
     public bool CaptionsEnabled { get; set; } = false;
     public bool HideInFullscreen { get; set; } = true;
