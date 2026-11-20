@@ -386,6 +386,10 @@
 
                         <!-- header -->
                         <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
                             <Grid HorizontalAlignment="Left" VerticalAlignment="Center" Margin="-6,0,0,0">
                                 <Canvas IsHitTestVisible="False">
                                     <Border x:Name="TabIndicator" Height="28" Width="70" CornerRadius="10"
@@ -429,11 +433,11 @@
                                     </RadioButton>
                                 </StackPanel>
                             </Grid>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0">
                                 <!-- privacy screen: blur everything behind the big clock, right now -->
-                                <Button x:Name="PrivacyButton" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="0,0,8,0" Click="StandbyNow_Click"
-                                        ToolTip="Privacy screen — blur everything (Ctrl+Alt+P)">
-                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="12" Foreground="{StaticResource FgDim}"/>
+                                <Button x:Name="PrivacyButton" Style="{StaticResource ChipButton}" Margin="0,0,10,0" Width="30" Height="28" Padding="0" Click="StandbyNow_Click"
+                                        ToolTip="Privacy screen — blur everything behind a big clock (Ctrl+Alt+P)">
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="12.5" Foreground="{StaticResource Fg}" VerticalAlignment="Center"/>
                                 </Button>
                                 <Grid x:Name="HeadCamDot" Width="8" Height="8" Margin="0,0,10,0" Visibility="Collapsed" ToolTip="Gesture camera is watching">
                                     <Ellipse Fill="{StaticResource GradCamera}">
