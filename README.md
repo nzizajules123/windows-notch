@@ -133,6 +133,21 @@ Expanded tabs:
 - **Shelf**: drag files, folders or text onto the notch to keep them. Double-click to open, drag out to use, right-click to show in Explorer. Saved between restarts.
 - **Control**: Lock · Sleep · Restart · Shut down, the hand-gesture switch, clap control, and Start with Windows.
 
+### The eyes speak 🔊
+
+Control → **Voice** makes the eyes say their speech bubbles out loud: greetings, reactions to pokes, nudges, charger
+messages. **Four claps 👏👏👏👏** switch the voice on or off (with Claps on), and it tells you so.
+
+- Click the voice chip to paste an **ElevenLabs API key** (it starts with `sk_`) and a voice ID; **Test** plays a sample.
+  The key is stored encrypted for your Windows account on this PC only. It's never put in the code or the releases.
+- Without a key, the notch uses the voice built into Windows.
+- Each phrase is made once and kept in `%APPDATA%\WindowsNotch\voice`, so the usual lines use ElevenLabs credits only the first time.
+- It stays quiet while music plays, so it never talks over your song.
+
+### Lyrics on the lock screen
+
+When a song with synced lyrics plays, the big-clock lock / privacy screen shows the lyrics in the middle: the line being
+sung large and glowing, with the lines before and after dimmed. They move along with the song.
 ### Camera hand gestures
 
 | Gesture (hand **close** to the camera, held ~1 s) | Action |

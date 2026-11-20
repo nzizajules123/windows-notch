@@ -139,7 +139,8 @@ public partial class NotchWindow : Window
         _theme.Changed += (c, ms) => Eyes.SetIris(c, ms);
         Eyes.Interacted += () => _hoverIntent.Stop();
         Eyes.Reaction += OnEyesReaction;
-        _bubbleTimer.Tick += (_, _) => HideBubble();
+        _bubbleTimer.Tick += (_, _) => { if (!_voice.Speaking) HideBubble(); };
+        InitVoice();
         _notifTick.Tick += (_, _) => OnNotifTick();
         TalkSwitch.IsChecked = _settings.EyesTalk;
         StandbySwitch.IsChecked = _settings.StandbyAfterMinutes > 0;
@@ -264,6 +265,9 @@ public partial class NotchWindow : Window
 
         // QA hooks: --demo expand | standby  (opens that view a few seconds after start)
         var args = Environment.GetCommandLineArgs();
+        // QA hook: --say "text"  (the eyes say it, out loud when the voice is on)
+        var sayAt = Array.IndexOf(args, "--say");
+        if (sayAt >= 0 && sayAt + 1 < args.Length) SayLater(args[sayAt + 1], 6000, 3000);
         var demo = Array.IndexOf(args, "--demo");
         if (demo >= 0 && demo + 1 < args.Length)
         {
@@ -558,11 +562,29 @@ public partial class NotchWindow : Window
             Expand();
             await Task.Delay(600);
             {
-                var preview = new StandbyWindow(_media).RenderPreview();
+                var preview = new StandbyWindow(_media, false, () => _currentLyrics).RenderPreview();
                 var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
                 enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(preview));
                 using var fs = System.IO.File.Create(System.IO.Path.Combine(dir, "15-standby.png"));
                 enc.Save(fs);
+            }
+            {
+                // the lock screen with synced lyrics (a pretend song and made-up lines, whatever is playing on this PC)
+                var keepLyrics = _currentLyrics;
+                _media.SetForSnapshot(new MediaInfo { AppId = "Spotify.exe", AppName = "Spotify", Title = "Midnight Drive", Artist = "Demo Artist",
+                    IsPlaying = true, Position = TimeSpan.FromSeconds(31), Duration = TimeSpan.FromSeconds(200), LastUpdated = DateTimeOffset.Now,
+                    Accent = Color.FromRgb(0xC0, 0x2A, 0x4A) });
+                var ly = new LyricsResult();
+                ly.Lines.Add(new LyricLine(TimeSpan.FromSeconds(20), "Streetlights humming in the rain"));
+                ly.Lines.Add(new LyricLine(TimeSpan.FromSeconds(26), "We keep driving through the night"));
+                ly.Lines.Add(new LyricLine(TimeSpan.FromSeconds(30), "Every song is playing just for you and me"));
+                ly.Lines.Add(new LyricLine(TimeSpan.FromSeconds(36), "Till the morning comes around"));
+                _currentLyrics = ly;
+                var preview2 = new StandbyWindow(_media, false, () => _currentLyrics).RenderPreview();
+                var enc2 = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc2.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(preview2));
+                using (var fs2 = System.IO.File.Create(System.IO.Path.Combine(dir, "15b-standby-lyrics.png"))) enc2.Save(fs2);
+                _currentLyrics = keepLyrics;
             }
             StartCountdown("Restarting", "Restart now", CancelHint(), () => { });
             await Task.Delay(1600); Save("7-countdown");
@@ -583,6 +605,7 @@ public partial class NotchWindow : Window
         _captions.Stop();
         _gestures?.Dispose();
         _claps?.Dispose();
+        _voice.Stop();
         _volume.Dispose();
         _brightness.Dispose();
         _notifications.Dispose();
@@ -930,6 +953,10 @@ public partial class NotchWindow : Window
     //  The eyes talk: speech bubble with greetings, reactions and gentle nudges
     // =======================================================================
     private readonly DispatcherTimer _bubbleTimer = new();
+    // the eyes' voice (ElevenLabs / Windows) and the little bob while they speak
+    private readonly VoiceService _voice = new();
+    private readonly DispatcherTimer _talkBob = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private int _talkBobDir = 1;
     private DateTime _lastHello = DateTime.MinValue, _lastSay = DateTime.MinValue, _nextChatter = DateTime.Now.AddMinutes(9);
     private static readonly Random Rng = new();
     private static string Pick(params string[] s) => s[Rng.Next(s.Length)];
@@ -948,9 +975,11 @@ public partial class NotchWindow : Window
     }
 
     /// <summary>Shows a little speech bubble under the pill; the eyes glance down at it.</summary>
-    private void Say(string text, int ms = 2600)
+    private void Say(string text, int ms = 2600, bool speak = true)
     {
         if (!_settings.EyesTalk || _mode != Mode.Collapsed || _intro || _bannerOpen || _standby != null || _eyesHidden) return;
+        // out loud too, unless music is playing (it would talk over your song)
+        if (speak && _settings.VoiceEnabled && _media.Current?.IsPlaying != true && App.SnapshotDir == null) _ = _voice.SpeakAsync(text);
         BubbleText.Text = text;
         Bubble.Margin = new Thickness(0, Notch.ActualHeight + 3, 0, 0);
         Bubble.Visibility = Visibility.Visible;
@@ -1025,7 +1054,7 @@ public partial class NotchWindow : Window
         if (Expanded) Collapse();
         HideBubble();
         StopTyping();
-        _standby = new StandbyWindow(_media, manual);
+        _standby = new StandbyWindow(_media, manual, () => _settings.LyricsEnabled ? _currentLyrics : null);
         _standby.Closed += (_, _) =>
         {
             _standby = null;
@@ -2628,7 +2657,8 @@ public partial class NotchWindow : Window
                 {
                     1 => _countdown > 0 ? "👏  Clap again to cancel" : "👏  Clap again to lock",
                     2 => _countdown > 0 ? "👏👏  Cancelling…" : "👏👏  Locking…  (once more = restart)",
-                    _ => "👏👏👏  Restart",
+                    3 => _countdown > 0 ? "👏👏👏" : "👏👏👏  Restart…  (once more = voice)",
+                    _ => _settings.VoiceEnabled ? "👏👏👏👏  Voice off" : "👏👏👏👏  Voice on",
                 },
                 "Closed_Fist" => _countdown > 0 ? "✊  Hold to cancel" : "✊  Hold to lock",
                 _ => "🖐  Hold to restart",
@@ -3346,7 +3376,7 @@ public partial class NotchWindow : Window
         if (ClapBlocker() is { } why) { App.Log($"clap {n} heard, ignored ({why})"); return; }
         App.Log($"clap {n} heard");
         if (n == 1 && _countdown == 0 && _mode != Mode.Collapsed) return;   // a lone clap only shows on the pill
-        SetHold(("Clap", ClapProgress(Math.Min(n, 3))), clap: true);
+        SetHold(("Clap", ClapProgress(Math.Min(n, 4))), clap: true);
     }
 
     private void OnClapSequence(int n, int spanMs)
@@ -3358,7 +3388,7 @@ public partial class NotchWindow : Window
             App.Log($"claps: {n} claps ignored ({why})");
             return;
         }
-        if (n > 3) return;   // applause, not a command
+        if (n > 4) return;   // applause, not a command
         _clapCooldown = DateTime.UtcNow.AddSeconds(4);
         App.Log($"claps fired: {n} claps in {spanMs} ms");
 
@@ -3367,10 +3397,88 @@ public partial class NotchWindow : Window
             if (_countdown > 0) CancelCountdown();   // two claps during a countdown = cancel
             else { Collapse(); PowerService.Lock(); }
         }
+        else if (n == 4)
+        {
+            SetVoice(!_settings.VoiceEnabled, announce: true);
+        }
         else if (_countdown == 0)
         {
             StartCountdown("Restarting", "Restart now", CancelHint("Three claps 👏👏👏 heard"), PowerService.Restart);
         }
+    }
+
+    // =======================================================================
+    //  Voice — the eyes speak (ElevenLabs voice with a key, otherwise the Windows voice)
+    // =======================================================================
+    private void InitVoice()
+    {
+        _voice.ApiKey = VoiceService.Unprotect(_settings.VoiceKey);
+        _voice.VoiceId = string.IsNullOrWhiteSpace(_settings.VoiceId) ? VoiceService.DefaultVoiceId : _settings.VoiceId;
+        _voice.Volume = _settings.VoiceVolume;
+        VoiceSwitch.IsChecked = _settings.VoiceEnabled;
+        _talkBob.Tick += (_, _) => { _talkBobDir = -_talkBobDir; Eyes.Nod(_talkBobDir); };
+        _voice.SpeakingChanged += on =>
+        {
+            UpdateVoiceUi();
+            if (on)
+            {
+                _talkBob.Start();
+                _bubbleTimer.Stop();           // keep the bubble up while the words are spoken
+            }
+            else
+            {
+                _talkBob.Stop();
+                _bubbleTimer.Interval = TimeSpan.FromMilliseconds(900);
+                _bubbleTimer.Stop();
+                _bubbleTimer.Start();
+            }
+        };
+        UpdateVoiceUi();
+    }
+
+    private void UpdateVoiceUi()
+    {
+        VoiceChipText.Text = !_settings.VoiceEnabled ? "Voice off"
+            : _voice.LastError != null && _voice.HasKey ? "⚠ " + _voice.LastError
+            : _voice.HasKey ? "ElevenLabs voice" : "Windows voice";
+        VoiceChip.ToolTip = (_voice.HasKey ? "Speaking with your ElevenLabs voice" : "Speaking with the Windows voice. Add an ElevenLabs key for a nicer one.")
+                            + "\nClick to set up the voice · 4 claps 👏👏👏👏 turn it on/off";
+    }
+
+    /// <summary>Turns the voice on or off; <paramref name="announce"/> says so out loud (used by the 4-clap toggle).</summary>
+    private void SetVoice(bool on, bool announce = false)
+    {
+        _settings.VoiceEnabled = on;
+        if (on && !_settings.EyesTalk) { _settings.EyesTalk = true; TalkSwitch.IsChecked = true; }   // a voice needs words
+        _settings.Save();
+        VoiceSwitch.IsChecked = on;
+        UpdateVoiceUi();
+        if (on)
+        {
+            var line = Pick("I can talk now! 😊", "Hello! You can hear me now 👋", "Voice on! Hi there ✨");
+            Say(line, 3000, speak: false);
+            _ = _voice.SpeakAsync(line);   // even if music plays: you just asked for it
+        }
+        else
+        {
+            _voice.Stop();
+            if (announce) Say("Okay, I'll be quiet 🤫", 2200, speak: false);
+        }
+    }
+
+    private void VoiceSwitch_Click(object sender, RoutedEventArgs e) => SetVoice(VoiceSwitch.IsChecked == true);
+
+    private void VoiceChip_Click(object sender, RoutedEventArgs e)
+    {
+        var w = new VoiceSetupWindow(_voice, VoiceService.Unprotect(_settings.VoiceKey), _settings.VoiceId);
+        if (w.ShowDialog() != true) return;
+        _settings.VoiceKey = VoiceService.Protect(w.ApiKey);
+        _settings.VoiceId = string.IsNullOrWhiteSpace(w.VoiceId) ? VoiceService.DefaultVoiceId : w.VoiceId.Trim();
+        _settings.Save();
+        _voice.ApiKey = w.ApiKey;
+        _voice.VoiceId = _settings.VoiceId;
+        if (!_settings.VoiceEnabled) SetVoice(true);
+        UpdateVoiceUi();
     }
 
     private void ClapChip_Click(object sender, RoutedEventArgs e)

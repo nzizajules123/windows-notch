@@ -15,6 +15,12 @@ public sealed class Settings
     public bool ClapsEnabled { get; set; } = false;
     /// <summary>The eyes say hi, react with little speech bubbles and give the odd gentle nudge.</summary>
     public bool EyesTalk { get; set; } = true;
+    /// <summary>The eyes speak their words out loud (ElevenLabs voice with a key, else the Windows voice).</summary>
+    public bool VoiceEnabled { get; set; } = false;
+    /// <summary>ElevenLabs API key, encrypted for this Windows account (DPAPI). Never stored in plain text.</summary>
+    public string? VoiceKey { get; set; }
+    public string VoiceId { get; set; } = WindowsNotch.Services.VoiceService.DefaultVoiceId;
+    public double VoiceVolume { get; set; } = 0.85;
     /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
     public int StandbyAfterMinutes { get; set; } = 5;
     /// <summary>Show "Claude is working…" style live activity in the small pill (off: only in the Activity tab).</summary>

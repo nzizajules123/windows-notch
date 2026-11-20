@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -52,6 +52,8 @@ public sealed class MediaService
     private int _thumbRetries;
 
     public MediaInfo? Current { get; private set; }
+    /// <summary>QA snapshots only: pretend this is playing (never used in normal runs).</summary>
+    internal void SetForSnapshot(MediaInfo m) { Current = m; }
     public IReadOnlyList<string> SessionApps { get; private set; } = Array.Empty<string>();
     public event Action? Changed;
 

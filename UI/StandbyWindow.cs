@@ -29,11 +29,19 @@ public sealed class StandbyWindow : Window
     private bool _closing;
     private readonly bool _manual;
     private readonly DateTime _shownAt = DateTime.Now;
+    // synced lyrics in the middle of the screen: previous · current (big) · next
+    private readonly Func<LyricsResult?>? _lyrics;
+    private readonly TextBlock _lyPrev = new(), _lyNow = new(), _lyNext = new();
+    private readonly StackPanel _lyBox = new();
+    private readonly DispatcherTimer _lyTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
+    private int _lyIdx = int.MinValue;
 
     /// <param name="manual">opened on purpose as a privacy screen: mouse moves don't close it, only a click or a key</param>
-    public StandbyWindow(MediaService media, bool manual = false)
+    /// <param name="lyrics">the notch's synced lyrics for what's playing (shown big in the middle)</param>
+    public StandbyWindow(MediaService media, bool manual = false, Func<LyricsResult?>? lyrics = null)
     {
         _media = media;
+        _lyrics = lyrics;
         _manual = manual;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -122,6 +130,27 @@ public sealed class StandbyWindow : Window
         _card.Child = cg;
         root.Children.Add(_card);
 
+        // 3b) synced lyrics, karaoke-style, between the clock and the card
+        _lyBox.HorizontalAlignment = HorizontalAlignment.Center;
+        _lyBox.VerticalAlignment = VerticalAlignment.Center;
+        _lyBox.Margin = new Thickness(60, Height * 0.16, 60, 0);
+        _lyBox.MaxWidth = Math.Min(1100, Width - 120);
+        _lyBox.IsHitTestVisible = false;
+        _lyBox.Visibility = Visibility.Collapsed;
+        var lyFont = new FontFamily("Segoe UI Variable Display, Segoe UI");
+        foreach (var (tb, size, alpha) in new[] { (_lyPrev, 22.0, (byte)0x66), (_lyNow, 40.0, (byte)0xFF), (_lyNext, 22.0, (byte)0x80) })
+        {
+            tb.FontFamily = lyFont; tb.FontSize = size; tb.TextAlignment = TextAlignment.Center;
+            tb.TextWrapping = TextWrapping.Wrap; tb.HorizontalAlignment = HorizontalAlignment.Center;
+            tb.FontWeight = tb == _lyNow ? FontWeights.Bold : FontWeights.SemiBold;
+            tb.Foreground = new SolidColorBrush(Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
+            tb.Margin = new Thickness(0, tb == _lyPrev ? 0 : 10, 0, 0);
+            _lyBox.Children.Add(tb);
+        }
+        _lyNow.Effect = new DropShadowEffect { BlurRadius = 28, ShadowDepth = 0, Opacity = 0.45, Color = Colors.White };
+        _lyNow.RenderTransform = new TranslateTransform();
+        root.Children.Add(_lyBox);
+
         // 4) battery + hint
         var foot = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 36) };
         _battery.FontSize = 13; _battery.FontWeight = FontWeights.SemiBold; _battery.Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
@@ -136,11 +165,13 @@ public sealed class StandbyWindow : Window
         Content = root;
 
         _clock.Tick += (_, _) => Refresh();
+        _lyTimer.Tick += (_, _) => RefreshLyrics();
         _media.Changed += Refresh;
         Loaded += (_, _) =>
         {
             Refresh();
             _clock.Start();
+            if (_lyrics != null) { RefreshLyrics(); _lyTimer.Start(); }
             Activate();
             Focus();
             _eyes.SetBaseMood(EyeMood.Sleepy);
@@ -151,7 +182,7 @@ public sealed class StandbyWindow : Window
             _card.RenderTransform = new TranslateTransform(0, 30);
             Motion.To(_card.RenderTransform, TranslateTransform.YProperty, 0, 900, Motion.OutQuint, 260);
         };
-        Closed += (_, _) => { _clock.Stop(); _media.Changed -= Refresh; };
+        Closed += (_, _) => { _clock.Stop(); _lyTimer.Stop(); _media.Changed -= Refresh; };
 
         // a short grace period so the click / shortcut that opened it doesn't close it straight away
         bool Settled() => (DateTime.Now - _shownAt).TotalMilliseconds > 700;
@@ -198,10 +229,37 @@ public sealed class StandbyWindow : Window
         _card.Background = new SolidColorBrush(AccentTheme.WithAlpha(AccentTheme.Darker(m.Accent, 0.55), 0x80));
     }
 
+    /// <summary>Shows the line being sung, with the one before and after; a new line slides up and fades in.</summary>
+    private void RefreshLyrics()
+    {
+        var m = _media.Current;
+        var ly = _lyrics?.Invoke();
+        if (m == null || ly == null || !ly.Synced)
+        {
+            _lyIdx = int.MinValue;
+            _lyBox.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var lines = ly.Lines;
+        var idx = ly.IndexAt(m.LivePosition);
+        _lyBox.Visibility = Visibility.Visible;
+        _lyBox.Opacity = m.IsPlaying ? 1 : 0.55;
+        if (idx == _lyIdx) return;
+        _lyIdx = idx;
+        _lyPrev.Text = idx > 0 ? lines[idx - 1].Text : "";
+        _lyNow.Text = idx >= 0 ? lines[idx].Text : "♪   ♪   ♪";
+        _lyNext.Text = idx + 1 < lines.Count ? lines[idx + 1].Text : "";
+        _lyPrev.Visibility = _lyPrev.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _lyNext.Visibility = _lyNext.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _lyNow.BeginAnimation(OpacityProperty, new DoubleAnimation(0.2, 1, TimeSpan.FromMilliseconds(380)) { EasingFunction = Motion.Out });
+        _lyNow.RenderTransform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(16, 0, TimeSpan.FromMilliseconds(520)) { EasingFunction = Motion.OutQuint });
+    }
+
     /// <summary>QA: renders the standby screen to an image without showing the window.</summary>
     public System.Windows.Media.Imaging.BitmapSource RenderPreview()
     {
         Refresh();
+        RefreshLyrics();
         var root = (FrameworkElement)Content;
         var size = new Size(Width, Height);
         root.Measure(size);

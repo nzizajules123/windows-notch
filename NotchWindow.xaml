@@ -1202,6 +1202,16 @@
                                         <TextBlock Text="Eyes talk" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <CheckBox x:Name="VoiceSwitch" Style="{StaticResource Switch}" Click="VoiceSwitch_Click"
+                                                  ToolTip="The eyes speak out loud · 4 claps turn it on/off"/>
+                                        <Button x:Name="VoiceChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="VoiceChip_Click">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE767;" FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="VoiceChipText" Text="Voice" FontSize="11" VerticalAlignment="Center" MaxWidth="130" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                         <CheckBox x:Name="StandbySwitch" Style="{StaticResource Switch}" Click="StandbySwitch_Click"
                                                   ToolTip="Show the big clock after 5 minutes away"/>
                                         <Button Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="StandbyNow_Click" ToolTip="Blur the screen behind the big clock now (Ctrl+Alt+P)">
@@ -1218,13 +1228,13 @@
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>
-                                    <Button Style="{StaticResource IconButton}" HorizontalAlignment="Right" Padding="10,4" Margin="0,6,0,0" Click="Quit_Click">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>
-                                            <TextBlock Text="Quit notch" FontSize="11" Foreground="{StaticResource FgDim}"/>
-                                        </StackPanel>
-                                    </Button>
                                 </StackPanel>
+                                <Button Style="{StaticResource IconButton}" HorizontalAlignment="Left" VerticalAlignment="Bottom" Padding="10,4" Margin="0,0,0,2" Click="Quit_Click">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>
+                                        <TextBlock Text="Quit notch" FontSize="11" Foreground="{StaticResource FgDim}"/>
+                                    </StackPanel>
+                                </Button>
                             </Grid>
                         </Grid>
 
