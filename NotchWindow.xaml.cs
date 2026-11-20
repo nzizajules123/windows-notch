@@ -3532,6 +3532,9 @@ public partial class NotchWindow : Window
         var on = _talk.Active;
         TalkGlyph.Text = on ? "" : "";   // stop · microphone
         TalkGlyph.Foreground = on ? new SolidColorBrush(Color.FromRgb(0xFF, 0x45, 0x3A)) : (Brush)FindResource("Fg");
+        TalkCardText.Text = on ? "Stop" : _talk.HasKey ? "Start" : "Set up";
+        TalkCardSub.Text = on ? (_talk.State == LiveTalkService.TalkState.Connecting ? "Connecting…" : "Listening — just talk")
+            : _talk.HasKey ? "Gemini Live  ·  Ctrl+Alt+T  ·  👏×4" : "Add a free Gemini key to talk";
         TalkButton.ToolTip = on ? "Stop talking (Ctrl+Alt+T · 4 claps)"
             : _talk.HasKey ? "Talk with the notch (Gemini Live) — Ctrl+Alt+T · 4 claps"
             : "Talk with the notch — add a Gemini API key first";

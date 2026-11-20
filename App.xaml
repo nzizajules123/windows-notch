@@ -1,4 +1,4 @@
-<Application x:Class="WindowsNotch.App"
+﻿<Application x:Class="WindowsNotch.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
@@ -248,11 +248,12 @@
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Height" Value="28"/>
+            <Setter Property="Width" Value="32"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border Background="Transparent" Padding="10,0">
-                            <ContentPresenter VerticalAlignment="Center"/>
+                        <Border Background="Transparent">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -267,16 +268,51 @@
             </Setter>
         </Style>
 
-        <!-- tab caption: only the selected tab shows its name, the rest are icon-only -->
+        <!-- tabs are icon-only (same width, so all nine always fit); the name is in the tooltip -->
         <Style x:Key="TabLabel" TargetType="TextBlock">
-            <Setter Property="Margin" Value="7,0,0,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Visibility" Value="Collapsed"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
-                    <Setter Property="Visibility" Value="Visible"/>
-                </DataTrigger>
-            </Style.Triggers>
+        </Style>
+
+        <!-- small round icon buttons inside the header's action capsule (talk · privacy) -->
+        <Style x:Key="HeadAction" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource FgDim}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="10" Background="Transparent">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#26FFFFFF"/>
+                                <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#40FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- one row of the Control tab's settings list: icon · label · (extra) · switch -->
+        <Style x:Key="SettingLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <Style x:Key="SettingIcon" TargetType="TextBlock" BasedOn="{StaticResource Glyph}">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{StaticResource FgDim}"/>
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="ChipToggle" TargetType="ToggleButton">

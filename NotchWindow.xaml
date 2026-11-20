@@ -1,4 +1,4 @@
-<Window x:Class="WindowsNotch.NotchWindow"
+﻿<Window x:Class="WindowsNotch.NotchWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WindowsNotch"
@@ -438,6 +438,8 @@
                                     <RadioButton x:Name="TabTodo" Style="{StaticResource TabButton}" GroupName="tabs" Tag="8" Checked="Tab_Checked" ToolTip="To-do &amp; reminders">
                                         <StackPanel Orientation="Horizontal"><Grid><TextBlock Style="{StaticResource Glyph}" Text="&#xE73A;" FontSize="12.5"/><Ellipse x:Name="TodoBadge" Width="6" Height="6" Fill="#FFFFB020" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0" Visibility="Collapsed"/></Grid><TextBlock Style="{StaticResource TabLabel}" Text="To-do"/></StackPanel>
                                     </RadioButton>
+                                    <!-- divider: media & messages | apps, shelf & control -->
+                                    <Border Width="1" Height="14" Margin="5,0" Background="#26FFFFFF" VerticalAlignment="Center" IsHitTestVisible="False"/>
                                     <RadioButton x:Name="TabApps" Style="{StaticResource TabButton}" GroupName="tabs" Tag="1" Checked="Tab_Checked" ToolTip="Apps">
                                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE71D;" FontSize="12.5"/><TextBlock Style="{StaticResource TabLabel}" Text="Apps"/></StackPanel>
                                     </RadioButton>
@@ -450,16 +452,20 @@
                                 </StackPanel>
                             </Grid>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0">
-                                <!-- live talk with Gemini: a spoken conversation with the notch -->
-                                <Button x:Name="TalkButton" Style="{StaticResource ChipButton}" Margin="0,0,6,0" Width="30" Height="28" Padding="0" Click="TalkLive_Click"
-                                        ToolTip="Talk with the notch (Gemini Live) — Ctrl+Alt+T · 4 claps">
-                                    <TextBlock x:Name="TalkGlyph" Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="12.5" Foreground="{StaticResource Fg}" VerticalAlignment="Center"/>
-                                </Button>
-                                <!-- privacy screen: blur everything behind the big clock, right now -->
-                                <Button x:Name="PrivacyButton" Style="{StaticResource ChipButton}" Margin="0,0,10,0" Width="30" Height="28" Padding="0" Click="StandbyNow_Click"
-                                        ToolTip="Privacy screen — blur everything behind a big clock (Ctrl+Alt+P)">
-                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="12.5" Foreground="{StaticResource Fg}" VerticalAlignment="Center"/>
-                                </Button>
+                                <!-- quick actions in one glass capsule: talk with the notch · privacy screen -->
+                                <Border CornerRadius="13" Background="{StaticResource GlassFill}" BorderBrush="{StaticResource GlassStroke}" BorderThickness="1"
+                                        Padding="2" Margin="0,0,10,0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="TalkButton" Style="{StaticResource HeadAction}" Click="TalkLive_Click"
+                                                ToolTip="Talk with the notch (Gemini Live) — Ctrl+Alt+T · 4 claps">
+                                            <TextBlock x:Name="TalkGlyph" Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="12" Foreground="{StaticResource Fg}"/>
+                                        </Button>
+                                        <Button x:Name="PrivacyButton" Style="{StaticResource HeadAction}" Margin="2,0,0,0" Click="StandbyNow_Click"
+                                                ToolTip="Privacy screen — blur everything behind a big clock (Ctrl+Alt+P)">
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="12" Foreground="{StaticResource Fg}"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
                                 <Grid x:Name="HeadCamDot" Width="8" Height="8" Margin="0,0,10,0" Visibility="Collapsed" ToolTip="Gesture camera is watching">
                                     <Ellipse Fill="{StaticResource GradCamera}">
                                         <Ellipse.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="0" Color="#FF30D158" Opacity="0.9"/></Ellipse.Effect>
@@ -1164,82 +1170,146 @@
                             <Grid Grid.Row="1" Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="232"/>
                                 </Grid.ColumnDefinitions>
-                                <!-- gesture card -->
-                                <Border CornerRadius="14" Background="{StaticResource GlassFill}" BorderBrush="{StaticResource GlassStroke}" BorderThickness="1" Padding="10,8"
-                                        VerticalAlignment="Top">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Grid Width="30" Height="30">
-                                            <Ellipse Fill="{StaticResource GradCamera}"/>
-                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE722;" FontSize="13"/>
+
+                                <!-- left: gestures & claps card, then quick actions -->
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Border CornerRadius="14" Background="{StaticResource GlassFill}" BorderBrush="{StaticResource GlassStroke}" BorderThickness="1" Padding="10,9">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Width="30" Height="30" VerticalAlignment="Top">
+                                                <Ellipse Fill="{StaticResource GradCamera}"/>
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE722;" FontSize="13"/>
+                                            </Grid>
+                                            <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="Gestures &amp; claps" FontSize="12.5" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="GestureStatus" FontSize="10.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"
+                                                           Text="✊ lock  ·  🖐 restart"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                                    <ToggleButton x:Name="PreviewChip" Style="{StaticResource ChipToggle}"
+                                                                  Click="PreviewChip_Click" ToolTip="Show the live camera with hand tracking in a small corner window">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE714;" FontSize="10" Margin="0,0,5,0"/><TextBlock Text="Preview"/></StackPanel>
+                                                    </ToggleButton>
+                                                    <ToggleButton x:Name="ClapChip" Style="{StaticResource ChipToggle}" Margin="6,0,0,0" Click="ClapChip_Click"
+                                                                  ToolTip="Clap control with the microphone (works without a camera): clap twice 👏👏 = lock, three times 👏👏👏 = restart, four times = talk. Ignored while you type, music plays or the notch speaks.">
+                                                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="10" Margin="0,0,5,0"/><TextBlock Text="Claps 👏"/></StackPanel>
+                                                    </ToggleButton>
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <CheckBox x:Name="GestureSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Top" Margin="0,2,0,0" Click="GestureSwitch_Click"
+                                                      ToolTip="Camera hand gestures"/>
                                         </Grid>
-                                        <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
-                                            <TextBlock Text="Gestures &amp; claps" FontSize="12.5" FontWeight="SemiBold"/>
-                                            <TextBlock x:Name="GestureStatus" FontSize="10.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis"
-                                                       Text="✊ close hand = lock  ·  🖐 open palm = restart"/>
-                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                                <ToggleButton x:Name="PreviewChip" Style="{StaticResource ChipToggle}"
-                                                              Click="PreviewChip_Click" ToolTip="Show the live camera with hand tracking in a small corner window">
-                                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE714;" FontSize="10" Margin="0,0,5,0"/><TextBlock Text="Preview"/></StackPanel>
-                                                </ToggleButton>
-                                                <ToggleButton x:Name="ClapChip" Style="{StaticResource ChipToggle}" Margin="6,0,0,0" Click="ClapChip_Click"
-                                                              ToolTip="Clap control with the microphone (works without a camera): clap twice 👏👏 = lock, three times 👏👏👏 = restart. Ignored while you type or music plays.">
-                                                    <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="10" Margin="0,0,5,0"/><TextBlock Text="Claps 👏"/></StackPanel>
-                                                </ToggleButton>
+                                    </Border>
+
+                                    <!-- talk with the notch (Gemini Live) -->
+                                    <Border Grid.Row="1" Margin="0,8,0,0" CornerRadius="14" Background="{StaticResource GlassFill}" BorderBrush="{StaticResource GlassStroke}" BorderThickness="1" Padding="10,7">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Width="30" Height="30">
+                                                <Ellipse>
+                                                    <Ellipse.Fill>
+                                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                            <GradientStop Color="#FF5E8BFF" Offset="0"/>
+                                                            <GradientStop Color="#FFB45CFF" Offset="1"/>
+                                                        </LinearGradientBrush>
+                                                    </Ellipse.Fill>
+                                                </Ellipse>
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE720;" FontSize="13"/>
+                                            </Grid>
+                                            <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="Talk with Notch" FontSize="12.5" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="TalkCardSub" FontSize="10.5" Foreground="{StaticResource FgDim}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"
+                                                           Text="Gemini Live  ·  Ctrl+Alt+T  ·  👏×4"/>
                                             </StackPanel>
-                                        </StackPanel>
-                                        <CheckBox x:Name="GestureSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="GestureSwitch_Click"/>
-                                    </Grid>
-                                </Border>
-                                <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox x:Name="StartupSwitch" Style="{StaticResource Switch}" Click="StartupSwitch_Click"/>
-                                        <TextBlock Text="Start with Windows" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                        <CheckBox x:Name="TalkSwitch" Style="{StaticResource Switch}" Click="TalkSwitch_Click"/>
-                                        <TextBlock Text="Eyes talk" FontSize="11" Foreground="{StaticResource FgDim}" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                        <CheckBox x:Name="VoiceSwitch" Style="{StaticResource Switch}" Click="VoiceSwitch_Click"
-                                                  ToolTip="The eyes speak out loud · 4 claps turn it on/off"/>
-                                        <Button x:Name="VoiceChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="VoiceChip_Click">
+                                            <Button x:Name="TalkCardButton" Grid.Column="2" Style="{StaticResource ChipButton}" VerticalAlignment="Center" Click="TalkLive_Click">
+                                                <TextBlock x:Name="TalkCardText" Text="Start" FontSize="11" FontWeight="SemiBold"/>
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- quick actions -->
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,8,0,0">
+                                        <Button Style="{StaticResource ChipButton}" Click="StandbyNow_Click" ToolTip="Blur the screen behind the big clock now (Ctrl+Alt+P)">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE767;" FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                                <TextBlock x:Name="VoiceChipText" Text="Voice" FontSize="11" VerticalAlignment="Center" MaxWidth="130" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE72E;" FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Privacy screen" FontSize="11" VerticalAlignment="Center"/>
                                             </StackPanel>
                                         </Button>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                        <CheckBox x:Name="StandbySwitch" Style="{StaticResource Switch}" Click="StandbySwitch_Click"
-                                                  ToolTip="Show the big clock after 5 minutes away"/>
-                                        <Button Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="StandbyNow_Click" ToolTip="Blur the screen behind the big clock now (Ctrl+Alt+P)">
-                                            <TextBlock Text="Privacy screen" FontSize="11"/>
-                                        </Button>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                        <CheckBox x:Name="UpdateSwitch" Style="{StaticResource Switch}" Click="UpdateSwitch_Click"
-                                                  ToolTip="Download new versions by themselves and install them while you're away"/>
-                                        <Button x:Name="UpdateChip" Style="{StaticResource ChipButton}" Margin="8,0,0,0" Click="UpdateChip_Click" ToolTip="Check for a new version">
+                                        <Button x:Name="UpdateChip" Style="{StaticResource ChipButton}" Margin="6,0,0,0" Click="UpdateChip_Click" ToolTip="Check for a new version">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock x:Name="UpdateGlyph" Style="{StaticResource Glyph}" Text="&#xE895;" FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                                <TextBlock x:Name="UpdateChipText" Text="Updates" FontSize="11" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="UpdateChipText" Text="Updates" FontSize="11" VerticalAlignment="Center" MaxWidth="150" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource ChipButton}" Margin="6,0,0,0" Click="Quit_Click" ToolTip="Quit the notch">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Quit" FontSize="11" VerticalAlignment="Center"/>
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>
-                                </StackPanel>
-                                <Button Style="{StaticResource IconButton}" HorizontalAlignment="Left" VerticalAlignment="Bottom" Padding="10,4" Margin="0,0,0,2" Click="Quit_Click">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE711;" FontSize="9" Foreground="{StaticResource FgDim}" Margin="0,0,6,0"/>
-                                        <TextBlock Text="Quit notch" FontSize="11" Foreground="{StaticResource FgDim}"/>
+                                </Grid>
+
+                                <!-- right: settings list (icon · name · switch), like a phone's settings -->
+                                <Border Grid.Column="1" Margin="10,0,0,0" CornerRadius="14" Background="{StaticResource GlassFill}" BorderBrush="{StaticResource GlassStroke}" BorderThickness="1"
+                                        Padding="12,5,8,5" VerticalAlignment="Stretch">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE7E8;"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Start with Windows"/>
+                                            <CheckBox x:Name="StartupSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="StartupSwitch_Click"/>
+                                        </Grid>
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE8BD;"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Eyes talk"/>
+                                            <CheckBox x:Name="TalkSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="TalkSwitch_Click"
+                                                      ToolTip="Little speech bubbles: hi, reactions and friendly nudges"/>
+                                        </Grid>
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE767;"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Voice"/>
+                                            <Button x:Name="VoiceChip" Grid.Column="2" Style="{StaticResource ChipButton}" Margin="8,0,6,0" Padding="8,2" HorizontalAlignment="Right" VerticalAlignment="Center" Click="VoiceChip_Click">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock x:Name="VoiceChipText" Text="Voice" FontSize="10.5" VerticalAlignment="Center" MaxWidth="96" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE76C;" FontSize="8" Margin="5,1,0,0" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                            <CheckBox x:Name="VoiceSwitch" Grid.Column="3" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="VoiceSwitch_Click"
+                                                      ToolTip="The eyes speak out loud"/>
+                                        </Grid>
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE916;"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Standby clock"/>
+                                            <CheckBox x:Name="StandbySwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="StandbySwitch_Click"
+                                                      ToolTip="Show the big clock after 5 minutes away"/>
+                                        </Grid>
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE895;"/>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Auto-update"/>
+                                            <CheckBox x:Name="UpdateSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="UpdateSwitch_Click"
+                                                      ToolTip="Download new versions by themselves and install them while you're away"/>
+                                        </Grid>
                                     </StackPanel>
-                                </Button>
+                                </Border>
                             </Grid>
                         </Grid>
 
