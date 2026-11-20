@@ -220,8 +220,39 @@ music plays the eyes step aside for the artwork and equaliser, and the current l
 - **To-do**: type tasks in plain words ("call mom at 5pm", "stretch in 20 min", "pay rent tomorrow") or tap a quick
   time. When one is due, the eyes jump and a ringing reminder drops from the island with **Done** and **Snooze 10 min**.
 - **Search**: YouTube songs play right inside the island.
+- **Clap control 👏** (switch on the setup screen): clap twice to **lock the phone**, three times to open the **power
+  menu**. Android doesn't let apps restart the phone, so that step is yours. It uses the microphone (you're asked
+  once) and shows a small "Listening for claps" notification. Claps are ignored while music plays, during calls and
+  when the phone is locked. Nothing is recorded.
 
 Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` then `gradlew assembleRelease`.
+
+## iPhone: Notch Island for iOS
+
+The island for iPhone (iOS 16.2+), in [`ios/`](ios). It lives in your **Dynamic Island**: when you leave the app, the
+eyes and battery stay up top. Long-press it to see what's playing and your next to-do with a live countdown (also shown on
+the lock screen).
+
+- In the app, the island is a pill with the time, the eyes and battery, and the lyric line while music plays. Tap it for:
+  - **Music**: what's playing in the Music app, with controls and synced lyrics from LRCLIB.
+  - **To-do**: tasks with reminders, which arrive as normal iPhone notifications.
+  - **Control**: the privacy screen, clap control, the Dynamic Island switch and Eyes talk.
+- **Clap control 👏**: clap twice for the **privacy screen** (and twice again to leave it). Clap three times to
+  **play/pause** music.
+- **Privacy screen**: a big clock over a blur.
+
+What iOS doesn't allow, so the iPhone version can't do it:
+- lock or restart the phone (so claps work only while the app is open);
+- read other apps' notifications;
+- see what Spotify or YouTube are playing (only the Music app);
+- draw over other apps (the Dynamic Island is the way to stay on screen).
+
+**Install:** download `NotchIsland-iOS-v*-unsigned.ipa` from [Releases](../../releases) and install it with
+[AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io), which sign it with your own Apple ID. With a free
+Apple ID the app has to be refreshed every 7 days.
+
+The `.ipa` is built on GitHub's Mac runners by [`.github/workflows/ios.yml`](.github/workflows/ios.yml). To build it
+yourself on a Mac: `brew install xcodegen`, then `cd ios && xcodegen generate`, and open `NotchIsland.xcodeproj`.
 
 ## Build from source
 
