@@ -98,6 +98,11 @@ public partial class NotchWindow : Window
     private int _gFrames;
     private (string gesture, double progress)? _hold;
 
+    // clap control (microphone)
+    private ClapListener? _claps;
+    private string _clapState = "off";
+    private DateTime _clapCooldown;
+
     // shelf drag-out tracking
     private Point _dragStart;
     private ShelfItem? _dragItem;
@@ -195,6 +200,7 @@ public partial class NotchWindow : Window
         CcToggle.IsChecked = _settings.CaptionsEnabled;
         GestureSwitch.IsChecked = _settings.GesturesEnabled;
         PreviewChip.IsChecked = _settings.ShowCameraPreview;
+        ClapChip.IsChecked = _settings.ClapsEnabled;
         StartupSwitch.IsChecked = PowerService.StartsWithWindows;
         InitUpdates();
 
@@ -273,6 +279,7 @@ public partial class NotchWindow : Window
         }
 
         // If we start while the PC is already locked, wait for the unlock event instead.
+        if (_settings.ClapsEnabled && !Native.IsSessionLocked()) StartClaps();
         if (_settings.GesturesEnabled && !Native.IsSessionLocked()) await StartGesturesAsync();
         UpdateGestureUi();
 
@@ -557,7 +564,7 @@ public partial class NotchWindow : Window
                 using var fs = System.IO.File.Create(System.IO.Path.Combine(dir, "15-standby.png"));
                 enc.Save(fs);
             }
-            StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", () => { });
+            StartCountdown("Restarting", "Restart now", CancelHint(), () => { });
             await Task.Delay(1600); Save("7-countdown");
             CancelCountdown();
             TabMedia.IsChecked = true;
@@ -575,6 +582,7 @@ public partial class NotchWindow : Window
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _captions.Stop();
         _gestures?.Dispose();
+        _claps?.Dispose();
         _volume.Dispose();
         _brightness.Dispose();
         _notifications.Dispose();
@@ -2614,9 +2622,17 @@ public partial class NotchWindow : Window
     {
         _tickerIsLyric = false;
         if (_hold is { } h)
-            return h.gesture == "Closed_Fist"
-                ? (_countdown > 0 ? "✊  Hold to cancel" : "✊  Hold to lock")
-                : "🖐  Hold to restart";
+            return h.gesture switch
+            {
+                "Clap" => ClapCount(h.progress) switch
+                {
+                    1 => _countdown > 0 ? "👏  Clap again to cancel" : "👏  Clap again to lock",
+                    2 => _countdown > 0 ? "👏👏  Cancelling…" : "👏👏  Locking…  (once more = restart)",
+                    _ => "👏👏👏  Restart",
+                },
+                "Closed_Fist" => _countdown > 0 ? "✊  Hold to cancel" : "✊  Hold to lock",
+                _ => "🖐  Hold to restart",
+            };
         if (_settings.CaptionsEnabled && !string.IsNullOrWhiteSpace(_captionLine)) return _captionLine;
         if (LyricLine() is { Length: > 0 } l) { _tickerIsLyric = true; return l; }
         if (_activityLine != null) return _activityLine;
@@ -3010,8 +3026,20 @@ public partial class NotchWindow : Window
     // =======================================================================
     private void Lock_Click(object sender, RoutedEventArgs e) { Collapse(); PowerService.Lock(); }
     private void Sleep_Click(object sender, RoutedEventArgs e) { Collapse(); PowerService.Sleep(); }
-    private void Restart_Click(object sender, RoutedEventArgs e) => StartCountdown("Restarting", "Restart now", "Close your hand ✊ or press Cancel to stop", PowerService.Restart);
-    private void Shutdown_Click(object sender, RoutedEventArgs e) => StartCountdown("Shutting down", "Shut down now", "Close your hand ✊ or press Cancel to stop", PowerService.Shutdown);
+    private void Restart_Click(object sender, RoutedEventArgs e) => StartCountdown("Restarting", "Restart now", CancelHint(), PowerService.Restart);
+    private void Shutdown_Click(object sender, RoutedEventArgs e) => StartCountdown("Shutting down", "Shut down now", CancelHint(), PowerService.Shutdown);
+
+    /// <summary>How to stop a countdown, naming only the controls that are switched on.</summary>
+    private string CancelHint(string? prefix = null)
+    {
+        var ways = new List<string>();
+        if (_settings.GesturesEnabled) ways.Add("close your hand ✊");
+        if (_settings.ClapsEnabled) ways.Add("clap twice 👏👏");
+        ways.Add("press Cancel");
+        var s = ways.Count == 1 ? ways[0] : string.Join(", ", ways.Take(ways.Count - 1)) + " or " + ways[^1];
+        s = char.ToUpper(s[0]) + s[1..] + " to stop";
+        return prefix == null ? s : prefix + " — " + char.ToLower(s[0]) + s[1..];
+    }
 
     private const double RingLength = 51.8; // circumference of the ring in stroke-thickness units
 
@@ -3258,7 +3286,7 @@ public partial class NotchWindow : Window
         var watching = _gestureState == "watching";
         MiniCamDot.Visibility = watching ? Visibility.Visible : Visibility.Collapsed;
         HeadCamDot.Visibility = MiniCamDot.Visibility;
-        GestureStatus.Text = _gestureState switch
+        var cam = _gestureState switch
         {
             "watching" => "Watching  ·  ✊ lock  ·  🖐 restart",
             "loading" or "ready" => "Loading hand-tracking model…",
@@ -3266,6 +3294,96 @@ public partial class NotchWindow : Window
             _ when _gestureState.StartsWith("error") => _gestureState.Replace("error: ", "⚠ "),
             _ => _gestureState,
         };
+        var clapLine = _clapState.StartsWith("error") ? _clapState.Replace("error: ", "⚠ ")
+            : _clapState == "listening" ? "Listening  ·  👏👏 lock  ·  👏👏👏 restart" : "Claps paused";
+        // show what's actually on: camera, claps, or both (camera line + a short clap note)
+        GestureStatus.Text = !_settings.ClapsEnabled ? cam
+            : !_settings.GesturesEnabled ? clapLine
+            : _clapState.StartsWith("error") ? clapLine
+            : _gestureState == "watching" ? "✊ / 👏👏 lock  ·  🖐 / 👏👏👏 restart"
+            : cam;
+        GestureStatus.ToolTip = _settings.ClapsEnabled && _settings.GesturesEnabled ? cam + "\n" + clapLine : null;
+    }
+
+    // =======================================================================
+    //  Clap control (microphone) — for PCs whose camera can't see hands well
+    // =======================================================================
+    private static double ClapProgress(int n) => n / 3.0;
+    private static int ClapCount(double progress) => (int)Math.Round(progress * 3);
+
+    private void StartClaps()
+    {
+        if (App.SnapshotDir != null) return;
+        if (_claps == null)
+        {
+            _claps = new ClapListener();
+            _claps.StatusChanged += st => Dispatcher.BeginInvoke(() =>
+            {
+                App.Log("claps: " + st);
+                _clapState = st;
+                UpdateGestureUi();
+            });
+            _claps.Analyzer.Clap += n => Dispatcher.BeginInvoke(() => OnClapHeard(n));
+            _claps.Analyzer.Sequence += (n, ms) => Dispatcher.BeginInvoke(() => OnClapSequence(n, ms));
+        }
+        _claps.Start();
+    }
+
+    /// <summary>Times claps must be ignored: hands on the keyboard/mouse (typing sounds), sound playing, locked, just acted.</summary>
+    private string? ClapBlocker(double spanMs = 0)
+    {
+        if (DateTime.UtcNow < _clapCooldown) return "cooldown";
+        if (Native.IsSessionLocked()) return "locked";
+        if (_media.Current?.IsPlaying == true) return "media playing";
+        // nobody claps with a hand on the mouse: any input during the claps means it was typing or clicking
+        if (Frost.IdleTime().TotalMilliseconds < spanMs + 500) return "keyboard/mouse in use";
+        return null;
+    }
+
+    private void OnClapHeard(int n)
+    {
+        if (!_settings.ClapsEnabled) return;
+        if (ClapBlocker() is { } why) { App.Log($"clap {n} heard, ignored ({why})"); return; }
+        App.Log($"clap {n} heard");
+        if (n == 1 && _countdown == 0 && _mode != Mode.Collapsed) return;   // a lone clap only shows on the pill
+        SetHold(("Clap", ClapProgress(Math.Min(n, 3))), clap: true);
+    }
+
+    private void OnClapSequence(int n, int spanMs)
+    {
+        if (_hold is { gesture: "Clap" }) SetHold(null, clap: true);
+        if (!_settings.ClapsEnabled || n < 2) return;
+        if (ClapBlocker(spanMs) is { } why)
+        {
+            App.Log($"claps: {n} claps ignored ({why})");
+            return;
+        }
+        if (n > 3) return;   // applause, not a command
+        _clapCooldown = DateTime.UtcNow.AddSeconds(4);
+        App.Log($"claps fired: {n} claps in {spanMs} ms");
+
+        if (n == 2)
+        {
+            if (_countdown > 0) CancelCountdown();   // two claps during a countdown = cancel
+            else { Collapse(); PowerService.Lock(); }
+        }
+        else if (_countdown == 0)
+        {
+            StartCountdown("Restarting", "Restart now", CancelHint("Three claps 👏👏👏 heard"), PowerService.Restart);
+        }
+    }
+
+    private void ClapChip_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ClapsEnabled = ClapChip.IsChecked == true;
+        _settings.Save();
+        if (_settings.ClapsEnabled)
+        {
+            StartClaps();
+            Say("Clap twice to lock 👏👏", 3200);
+        }
+        else { _claps?.Stop(); if (_hold is { gesture: "Clap" }) SetHold(null, clap: true); }
+        UpdateGestureUi();
     }
 
     private async void GestureSwitch_Click(object sender, RoutedEventArgs e)
@@ -3302,7 +3420,12 @@ public partial class NotchWindow : Window
         App.Log("session: " + e.Reason);
         Dispatcher.BeginInvoke(async () =>
         {
-            if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); SetHold(null); }
+            if (e.Reason == SessionSwitchReason.SessionLock) { _gestures?.Stop(); _claps?.Stop(); SetHold(null); }
+            if (e.Reason == SessionSwitchReason.SessionUnlock && _settings.ClapsEnabled)
+            {
+                _clapCooldown = DateTime.UtcNow.AddSeconds(3);
+                StartClaps();
+            }
             if (e.Reason == SessionSwitchReason.SessionUnlock) SayLater(Pick("Welcome back! 👋", "Hey, you're back! 😊", "Missed you 👀"), 1200, 2600);
             if (e.Reason == SessionSwitchReason.SessionLock) { /* handled above */ }
             else if (e.Reason == SessionSwitchReason.SessionUnlock && _settings.GesturesEnabled)
@@ -3350,13 +3473,15 @@ public partial class NotchWindow : Window
         }
         else if (eff == "Open_Palm")
         {
-            StartCountdown("Restarting", "Restart now", "Open palm 🖐 detected — close your hand ✊ or press Cancel to stop", PowerService.Restart);
+            StartCountdown("Restarting", "Restart now", CancelHint("Open palm 🖐 detected"), PowerService.Restart);
         }
     }
 
-    private void SetHold((string gesture, double progress)? hold)
+    private void SetHold((string gesture, double progress)? hold, bool clap = false)
     {
         if (hold == null && _hold == null) return;
+        // the camera clears its hint every frame; that must not wipe a clap hint (claps clear their own)
+        if (hold == null && !clap && _hold is { gesture: "Clap" }) return;
         _hold = hold;
         RefreshLiveLine();
     }

@@ -131,7 +131,7 @@ Expanded tabs:
 - **Media**: big artwork, title/artist, seekable progress bar, previous/play/next. Click the source chip to switch between Chrome, Spotify, VLC and so on. **Lyrics** shows time-synced lyrics (automatic for Spotify, from LRCLIB). **CC** shows live captions for YouTube, Chrome or any audio, using Windows 11 Live Captions with its window hidden.
 - **Apps**: every open window (VS Code, VLC, Terminal, Chrome…). Click to switch to it; hover and press ✕ to close it.
 - **Shelf**: drag files, folders or text onto the notch to keep them. Double-click to open, drag out to use, right-click to show in Explorer. Saved between restarts.
-- **Control**: Lock · Sleep · Restart · Shut down, the hand-gesture switch, and Start with Windows.
+- **Control**: Lock · Sleep · Restart · Shut down, the hand-gesture switch, clap control, and Start with Windows.
 
 ### Camera hand gestures
 
@@ -161,6 +161,23 @@ py -3.12 -m pip install -r python/requirements.txt
 ```
 
 Check your camera's picture quality with `python python/camera_probe.py` (lower `stripes` / `colnoise` is better).
+
+### Clap control (no camera needed)
+
+For PCs whose camera can't see hands well: Control → Gestures & claps → **Claps 👏** listens with the microphone.
+It works on its own, or together with the camera gestures. Switch on either one, or both.
+
+| Claps | Action |
+|---|---|
+| 👏👏 Two claps | **Lock** the PC |
+| 👏👏👏 Three claps | **Restart**, after the countdown you can cancel |
+| 👏👏 during a countdown | **Cancel** the restart / shutdown |
+
+- Clap in a steady rhythm, about half a second apart. The pill shows each clap it hears.
+- Ignored while your hands are on the keyboard or mouse (so typing never locks the PC), while music or a video plays,
+  for a few seconds after unlocking, and on the lock screen. The microphone is released while the PC is locked.
+- Talking, knocks, music and applause (four or more claps) don't count. Sound is analysed live and never recorded.
+- Needs **Settings → Privacy → Microphone → "Let desktop apps access your microphone"**.
 
 ## Download
 
@@ -225,6 +242,7 @@ time to download the MediaPipe model (about 8 MB, cached afterwards). Captions: 
 ```json
 {
   "GesturesEnabled": true,
+  "ClapsEnabled": false,       // clap control through the microphone
   "MinHandSize": 0.30,          // raise to require the hand even closer
   "HoldMs": 900,                // how long to hold a gesture
   "PowerCountdownSec": 5,
