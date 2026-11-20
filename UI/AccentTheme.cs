@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 
@@ -13,7 +13,7 @@ public sealed class AccentTheme
     public static readonly Color Default = System.Windows.Media.Color.FromRgb(0x30, 0xD1, 0x58);
 
     private readonly SolidColorBrush _solid, _soft, _faint;
-    private readonly GradientStop _vTop, _vBottom, _hLeft, _hRight, _lineMid, _ambTop, _washA, _washB;
+    private readonly GradientStop _vTop, _vBottom, _hLeft, _hRight, _lineMid, _ambTop, _washA, _washB, _pillL, _pillR;
     private readonly List<DropShadowEffect> _glows = new();
     public Color Current { get; private set; } = Default;
 
@@ -51,8 +51,17 @@ public sealed class AccentTheme
         _washB = new GradientStop(WithAlpha(Darker(Default, 0.5), 0x33), 0.55);
         var wash = new LinearGradientBrush(new GradientStopCollection { _washA, _washB, new(Colors.Transparent, 1) }, new Point(0, 0), new Point(1, 1));
 
+        // the small pill's own tint: music colour at both ends over neutral smoke, so it never reads as plain black
+        _pillL = new GradientStop(WithAlpha(Default, 0x4D), 0);
+        _pillR = new GradientStop(WithAlpha(Default, 0x30), 1);
+        var pill = new LinearGradientBrush(new GradientStopCollection
+        {
+            _pillL, new(Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF), 0.42), new(Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF), 0.58), _pillR,
+        }, new Point(0, 0.5), new Point(1, 0.5));
+
         var r = target;
         r["AccentWash"] = wash;
+        r["AccentPill"] = pill;
         r["Accent"] = _solid;
         r["AccentSoft"] = _soft;
         r["AccentFaint"] = _faint;
@@ -86,6 +95,8 @@ public sealed class AccentTheme
         Motion.Color(_ambTop, GradientStop.ColorProperty, WithAlpha(c, 0x55), ms);
         Motion.Color(_washA, GradientStop.ColorProperty, WithAlpha(c, 0x66), ms);
         Motion.Color(_washB, GradientStop.ColorProperty, WithAlpha(Darker(c, 0.5), 0x33), ms);
+        Motion.Color(_pillL, GradientStop.ColorProperty, WithAlpha(c, 0x4D), ms);
+        Motion.Color(_pillR, GradientStop.ColorProperty, WithAlpha(c, 0x30), ms);
         foreach (var g in _glows) Motion.Color(g, DropShadowEffect.ColorProperty, c, ms);
     }
 

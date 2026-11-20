@@ -170,6 +170,22 @@
                         <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#14000000" Offset="0"/><GradientStop Color="#59000000" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
                     </Grid>
 
+                    <!-- the small pill's own glass: music-coloured tint + a soft top sheen. It doesn't depend on what's
+                         behind the notch, so the pill looks the same over a black title bar, a dark wallpaper, or when
+                         Windows won't let us read the screen. -->
+                    <Grid x:Name="PillGlass" Opacity="0" IsHitTestVisible="False">
+                        <Rectangle Fill="{DynamicResource AccentPill}"/>
+                        <Rectangle>
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#2EFFFFFF" Offset="0"/>
+                                    <GradientStop Color="#0AFFFFFF" Offset="0.5"/>
+                                    <GradientStop Color="#00FFFFFF" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+                    </Grid>
+
                     <!-- hairline rim -->
                     <Border x:Name="Rim" BorderBrush="{StaticResource RimStroke}" BorderThickness="1" Opacity="0" IsHitTestVisible="False"
                             CornerRadius="{Binding CornerRadius, ElementName=Notch}"/>

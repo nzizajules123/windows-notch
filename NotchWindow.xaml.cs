@@ -59,7 +59,7 @@ public partial class NotchWindow : Window
     private UIElement? _card;                                  // view shown in Peek mode (peek / charge / device)
     // the island's tint over the acrylic blur: solid while collapsed, frosted when open
     private readonly SolidColorBrush _glass = new(Color.FromRgb(0, 0, 0));
-    private static readonly Color GlassCollapsed = Color.FromArgb(0xF0, 0x10, 0x10, 0x14);
+    private static readonly Color GlassCollapsed = Color.FromArgb(0xF2, 0x1C, 0x1C, 0x22);   // graphite, not black
     // smoked glass (no system blur behind it, so it stays nearly opaque to keep text readable)
     private static readonly Color GlassPeek = Color.FromArgb(0xF5, 0x0C, 0x0C, 0x10);
     private static readonly Color GlassOpen = Color.FromArgb(0xF0, 0x0E, 0x0E, 0x12);
@@ -240,6 +240,7 @@ public partial class NotchWindow : Window
 
         // Entrance: a droplet falls, bounces like a ball, then melts into the top edge and spreads into the island.
         if (App.SnapshotDir == null || App.IntroCapture) PlayIntro();
+        else EnterFloatingPill(0);   // snapshots skip the intro: start straight on the floating pill
         if (App.IntroCapture) { _ = CaptureIntroAsync(App.SnapshotDir!); return; }
 
         _media.Changed += OnMediaChanged;
@@ -2127,7 +2128,8 @@ public partial class NotchWindow : Window
         {
             const double pad = 50;
             var area = new Rect((Root.ActualWidth - ExpandedW) / 2, FloatGap, ExpandedW, ExpandedHChat + 12);
-            FrostImage.Source = Frost.Behind(this, area, pad);
+            var shot = Frost.Behind(this, area, pad);
+            FrostImage.Source = Frost.LooksBlank(shot) ? null : shot;   // Windows sometimes hands back an all-black picture
             FrostImage.Width = ExpandedW + 2 * pad;
             FrostImage.Height = area.Height + 2 * pad;
             FrostImage.Margin = new Thickness(0, -pad, 0, 0);
@@ -2163,6 +2165,7 @@ public partial class NotchWindow : Window
         Motion.Show(ExpandedView, 320, 150, blur: 14, fromY: -12);
 
         Motion.To(Ambient, OpacityProperty, 1, 600, Motion.Out, 120);
+        Motion.To(PillGlass, OpacityProperty, 0, 300);
         Motion.To(Rim, OpacityProperty, 1, 400, Motion.Out, 150);
         Motion.To(NotchShadow, OpacityProperty, 1, 400);
         Motion.To(NotchGlow, OpacityProperty, 0.85, 700, Motion.Out, 100);
@@ -2189,6 +2192,7 @@ public partial class NotchWindow : Window
         Motion.To(EarL, OpacityProperty, 0, 200);
         Motion.To(EarR, OpacityProperty, 0, 200);
         Motion.To(Ambient, OpacityProperty, 1, ms);
+        Motion.To(PillGlass, OpacityProperty, 1, ms);
         Motion.To(Rim, OpacityProperty, 0.8, ms);
         Motion.To(NotchShadow, OpacityProperty, 0.55, ms);
         RefreshPillFrost();
@@ -2202,7 +2206,7 @@ public partial class NotchWindow : Window
         var w = CollapsedWTicker + 30;
         var area = new Rect((Root.ActualWidth - w) / 2, PillFloat, w, CollapsedH + TickerH + 6);
         var shot = Frost.Behind(this, area, pad);
-        if (shot == null) return;
+        if (shot == null || Frost.LooksBlank(shot)) { FrostImage.Source = null; return; }   // the pill's own glass still shows
         FrostImage.Source = shot;
         FrostImage.Width = w + 2 * pad;
         FrostImage.Height = area.Height + 2 * pad;

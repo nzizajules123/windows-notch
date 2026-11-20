@@ -64,6 +64,32 @@ public static class Frost
         return Capture((int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(w), (int)Math.Round(h));
     }
 
+    /// <summary>
+    /// True when a capture came back all black — what BitBlt returns on some PCs (remote desktop, some GPU drivers,
+    /// protected video). Blurring that would just make the notch black, so callers skip it.
+    /// </summary>
+    public static bool LooksBlank(BitmapSource? src)
+    {
+        if (src == null) return true;
+        try
+        {
+            var conv = src.Format == PixelFormats.Bgra32 || src.Format == PixelFormats.Bgr32 ? src : new FormatConvertedBitmap(src, PixelFormats.Bgr32, null, 0);
+            int w = conv.PixelWidth, h = conv.PixelHeight;
+            if (w <= 0 || h <= 0) return true;
+            var row = new byte[w * 4];
+            int max = 0;
+            for (int i = 1; i <= 5; i++)
+            {
+                conv.CopyPixels(new Int32Rect(0, h * i / 6, w, 1), row, row.Length, 0);
+                for (int x = 0; x < row.Length; x += 4)
+                    max = Math.Max(max, Math.Max(row[x], Math.Max(row[x + 1], row[x + 2])));
+                if (max > 6) return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
     // ------------------------------------------------------------------ idle time (for the standby clock)
     [StructLayout(LayoutKind.Sequential)] private struct LASTINPUTINFO { public uint cbSize, dwTime; }
     [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
