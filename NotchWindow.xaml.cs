@@ -963,6 +963,8 @@ public partial class NotchWindow : Window
     private readonly VoiceService _voice = new();
     // live spoken conversation with Gemini, and the caption it shows in the pill
     private readonly LiveTalkService _talk = new();
+    private readonly TalkMemory _memory = new();
+    private bool _ducked;
     private string? _liveLine;
     private readonly DispatcherTimer _talkBob = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private int _talkBobDir = 1;
@@ -2505,6 +2507,7 @@ public partial class NotchWindow : Window
 
     private void OnMediaChanged()
     {
+        UpdateDucking();
         var m = _media.Current;
         var trackChanged = m?.TrackKey != _lastTrackKey;
         if (trackChanged && m?.IsPlaying == true && _lastTrackKey != null && _mode == Mode.Collapsed && Rng.Next(3) == 0)
@@ -3498,6 +3501,8 @@ public partial class NotchWindow : Window
         _talk.ApiKey = VoiceService.Unprotect(_settings.GeminiKey);
         _talk.VoiceName = string.IsNullOrWhiteSpace(_settings.GeminiVoice) ? "Kore" : _settings.GeminiVoice;
         _talk.Tools = LiveTools();
+        _talk.MusicPlaying = () => _media.Current?.IsPlaying == true;
+        _talk.Exchange += (you, notch) => _memory.Add(you, notch);
         _talk.ToolHandler = (name, args) => Dispatcher.InvokeAsync(() => RunVoiceActionAsync(name, args)).Task.Unwrap();
         _talk.StateChanged += (st, msg) => Dispatcher.BeginInvoke(() => OnLiveState(st, msg));
         _talk.ModelText += t => Dispatcher.BeginInvoke(() => { _liveLine = "✨  " + Tail(t); RefreshLiveLine(); });
@@ -3511,12 +3516,12 @@ public partial class NotchWindow : Window
     /// <summary>What the notch can do when you ask out loud. Restart / shut down are deliberately not here.</summary>
     private static object[] LiveTools() => new object[]
     {
-        new { name = "open_app", description = "Open an app on the user's Windows PC by its name (e.g. VS Code, Chrome, Spotify, WhatsApp, Word, File Explorer, Settings, Calculator).",
+        new { name = "open_app", description = "Open or switch to an app on the user's Windows PC by its name (e.g. VS Code, Chrome, Spotify, WhatsApp, Word, File Explorer, Settings, Calculator, Start menu). If it's already open it comes to the front.",
               parameters = new { type = "OBJECT", properties = new { name = Str("The app's name as the user said it") }, required = new[] { "name" } } },
         new { name = "play_music", description = "Search YouTube for a song, artist or playlist and play the top result in the notch's music player.",
               parameters = new { type = "OBJECT", properties = new { query = Str("What to play, e.g. 'Calm Down Rema' or 'lofi beats'") }, required = new[] { "query" } } },
         new { name = "media_control", description = "Control whatever music or video is playing on the PC.",
-              parameters = new { type = "OBJECT", properties = new { action = new { type = "STRING", description = "What to do", @enum = new[] { "play", "pause", "next", "previous" } } }, required = new[] { "action" } } },
+              parameters = new { type = "OBJECT", properties = new { action = new { type = "STRING", description = "What to do", @enum = new[] { "play", "pause", "stop", "next", "previous" } } }, required = new[] { "action" } } },
         new { name = "now_playing", description = "Find out what song or video is playing on the PC right now." },
         new { name = "web_search", description = "Search the web in the user's browser.",
               parameters = new { type = "OBJECT", properties = new { query = Str("The search") }, required = new[] { "query" } } },
@@ -3524,8 +3529,40 @@ public partial class NotchWindow : Window
               parameters = new { type = "OBJECT", properties = new { url = Str("The address, e.g. youtube.com or https://github.com") }, required = new[] { "url" } } },
         new { name = "add_todo", description = "Add a task to the user's to-do list in the notch. Include any time in the text so a reminder is set (e.g. 'call mom at 5pm', 'stretch in 20 min').",
               parameters = new { type = "OBJECT", properties = new { text = Str("The task in plain words, with the time if there is one") }, required = new[] { "text" } } },
-        new { name = "lock_pc", description = "Lock the PC. Only when the user clearly asks to lock it." },
+        new { name = "lock_pc", description = "Lock the PC (Windows lock screen, needs the password to get back). Only when the user clearly asks to lock it." },
+        new { name = "list_open_apps", description = "List the apps and windows that are open on the PC right now." },
+        new { name = "close_app", description = "Close an open app or window by name (e.g. Chrome, VS Code, Notepad, File Explorer). Apps may still ask to save unsaved work.",
+              parameters = new { type = "OBJECT", properties = new { name = Str("The app or window name as the user said it") }, required = new[] { "name" } } },
+        new { name = "privacy_screen", description = "Turn the notch's privacy screen on or off: a big clock over a blurred screen that hides what's on the PC (it does not lock it). Use for 'put on privacy', 'hide my screen', 'privacy off'.",
+              parameters = new { type = "OBJECT", properties = new { on = new { type = "BOOLEAN", description = "true = show it, false = hide it" } }, required = new[] { "on" } } },
+        new { name = "forget_memory", description = "Forget all earlier conversations the notch remembers. Only when the user asks to forget or clear the memory." },
     };
+
+    /// <summary>Closes open windows whose app name (or, failing that, window title) matches; like clicking their X.</summary>
+    private List<string> CloseApps(string spoken)
+    {
+        var closed = new List<string>();
+        foreach (var a in FindOpenApps(spoken))
+        {
+            AppsService.Close(a.Hwnd);
+            closed.Add(a.Name);
+        }
+        if (closed.Count > 0) App.Log($"voice: closed {string.Join(", ", closed)}");
+        return closed;
+    }
+
+    /// <summary>Open windows whose app name (or, failing that, window title) matches what was said.</summary>
+    private List<AppWindowItem> FindOpenApps(string spoken)
+    {
+        var want = System.Text.RegularExpressions.Regex.Replace(spoken.ToLowerInvariant(), @"\b(the|app|window|windows)\b", " ").Trim();
+        want = System.Text.RegularExpressions.Regex.Replace(want, @"\s+", " ");
+        want = want switch { "vscode" or "visual studio code" or "code" => "vs code", "google chrome" or "browser" => "chrome", "explorer" or "files" or "my files" => "file explorer", _ => want };
+        if (want.Length < 2) return new();
+        _apps.Refresh();
+        var items = _apps.Items.ToList();
+        var byName = items.Where(a => a.Name.ToLowerInvariant().Contains(want) || (want.Length >= 4 && want.Contains(a.Name.ToLowerInvariant().TrimEnd('…')))).ToList();
+        return byName.Count > 0 ? byName : items.Where(a => want.Length >= 4 && a.Title.ToLowerInvariant().Contains(want)).ToList();
+    }
 
     private static string Arg(System.Text.Json.JsonElement args, string name) =>
         args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString()!.Trim() : "";
@@ -3538,6 +3575,18 @@ public partial class NotchWindow : Window
             case "open_app":
             {
                 var want = Arg(args, "name");
+                if (System.Text.RegularExpressions.Regex.IsMatch(want, @"^(the\s+)?start(\s+menu)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    Native.keybd_event(0x5B, 0, 0, UIntPtr.Zero);   // Windows key
+                    Native.keybd_event(0x5B, 0, 2, UIntPtr.Zero);
+                    return ("Opened the Start menu.", false);
+                }
+                // already open? bring it to the front instead of starting another copy
+                if (FindOpenApps(want).FirstOrDefault() is { } open)
+                {
+                    AppsService.Focus(open.Hwnd);
+                    return ($"Switched to {open.Name} (it was already open).", false);
+                }
                 var opened = want.Length == 0 ? null : AppLauncher.Open(want);
                 if (opened == null) return ($"No app called \"{want}\" was found on this PC.", false);
                 Eyes.Express(EyeMood.Happy, 1000);
@@ -3553,8 +3602,8 @@ public partial class NotchWindow : Window
                 foreach (var r in list) _results.Add(r);
                 _resultsFor = q;
                 await PlayResultAsync(0);
-                // hang up after the confirmation: otherwise Gemini would listen to the song through the mic
-                return ($"Now playing \"{list[0].Title}\" ({list[0].Channel}).", true);
+                // the chat stays open: say "stop it", "next" or just keep talking
+                return ($"Now playing \"{list[0].Title}\" ({list[0].Channel}). The music is playing quietly while you talk.", false);
             }
             case "media_control":
             {
@@ -3563,14 +3612,15 @@ public partial class NotchWindow : Window
                 if (m == null) return ("Nothing is playing or paused right now.", false);
                 switch (action)
                 {
-                    case "next": await _media.NextAsync(); return ("Skipped to the next track.", true);
-                    case "previous": await _media.PreviousAsync(); return ("Went back to the previous track.", true);
+                    case "next": await _media.NextAsync(); return ("Skipped to the next track.", false);
+                    case "previous": await _media.PreviousAsync(); return ("Went back to the previous track.", false);
                     case "pause":
+                    case "stop":
                         if (m.IsPlaying) await _media.PlayPauseAsync();
                         return ("Paused.", false);
                     default:
                         if (!m.IsPlaying) await _media.PlayPauseAsync();
-                        return ($"Playing \"{m.Title}\".", true);
+                        return ($"Playing \"{m.Title}\".", false);
                 }
             }
             case "now_playing":
@@ -3603,6 +3653,28 @@ public partial class NotchWindow : Window
                 Eyes.Express(EyeMood.Happy, 1000);
                 return (due is { } d ? $"Added \"{text}\" with a reminder at {d:dddd HH:mm}." : $"Added \"{text}\" to the to-do list.", false);
             }
+            case "list_open_apps":
+            {
+                _apps.Refresh();
+                var names = _apps.Items.Select(a => a.Name).Distinct().ToList();
+                return (names.Count == 0 ? "No apps are open." : "Open: " + string.Join(", ", names) + ".", false);
+            }
+            case "close_app":
+            {
+                var want = Arg(args, "name");
+                var closed = CloseApps(want);
+                return (closed.Count == 0 ? $"No open app called \"{want}\" was found." : "Closed " + string.Join(", ", closed.Distinct()) + ".", false);
+            }
+            case "privacy_screen":
+            {
+                var on = args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty("on", out var o) && o.ValueKind == System.Text.Json.JsonValueKind.True;
+                if (on) { if (_standby == null) ShowStandby(manual: true); return ("The privacy screen is on. Say \"privacy off\", click or press a key to hide it.", false); }
+                _standby?.Dismiss("voice");
+                return ("The privacy screen is off.", false);
+            }
+            case "forget_memory":
+                _memory.Clear();
+                return ("Forgot all earlier conversations.", false);
             case "lock_pc":
                 _talk.Stop("locking");
                 Collapse();
@@ -3637,6 +3709,16 @@ public partial class NotchWindow : Window
         }
         UpdateTalkUi();
         RefreshLiveLine();
+        UpdateDucking();
+    }
+
+    /// <summary>While you talk to the notch, its own music plays quieter, so you and Gemini can hear each other.</summary>
+    private void UpdateDucking()
+    {
+        var duck = _talk.Active && _media.Current?.AppId == YouTubePlayer.AppId;
+        if (duck == _ducked) return;
+        _ducked = duck;
+        _player.SetVolume(duck ? 30 : 100);
     }
 
     private void UpdateTalkUi()
@@ -3680,8 +3762,11 @@ public partial class NotchWindow : Window
                "Reply in the language the user speaks. " +
                "You can act on the PC with your tools: open apps, search and play music, pause / skip music, search the web, open websites, add to-dos with reminders and lock the PC. " +
                "When the user asks for one of these, call the tool straight away (don't ask for confirmation), then say in a few words what you did. " +
+               "You can also list and close open apps, and turn the privacy screen on or off (that only hides the screen; lock_pc really locks the PC). " +
                "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
-               $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}";
+               "Music may be playing quietly in the background while you talk: ignore song lyrics and only answer when the user speaks to you. " +
+               $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}" +
+               (_memory.Count > 0 ? "\n\nYour earlier conversations with the user (oldest first). Use them to remember what you talked about; don't list them unless asked:\n" + _memory.Recent() : "");
     }
 
     private void VoiceChip_Click(object sender, RoutedEventArgs e)

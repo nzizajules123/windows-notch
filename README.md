@@ -162,7 +162,9 @@ greets you, and you just talk.
 
 | Say something like | It will |
 |---|---|
-| "Open VS Code", "open Spotify", "open my files" | open the app (anything in the Start menu, including Store apps) |
+| "Open VS Code", "open Spotify", "open the start menu" | open the app (anything in the Start menu, including Store apps), or bring it to the front if it's already open |
+| "Close Chrome", "close Notepad", "what's open?" | close open apps (like clicking their X, so they can still ask to save) or list them |
+| "Put on privacy", "privacy off" | show or hide the privacy screen (big clock over a blur) |
 | "Play Calm Down by Rema", "play some lofi beats" | find it on YouTube and play it in the notch's player |
 | "Pause", "next song", "go back" | control whatever is playing |
 | "What's playing?" | tell you the song |
@@ -170,7 +172,14 @@ greets you, and you just talk.
 | "Remind me to call mom at 5pm" | add it to the to-do list, with a reminder |
 | "Lock my PC" | lock the PC |
 
-After it starts music, the notch says what's playing and ends the chat, so it doesn't listen to the song.
+**Music and talking together.** After "play …" the chat stays open: say "stop it", "next song" or just keep talking.
+While you talk, the notch's own music plays quieter, and only your voice (clearly louder than the music) is passed
+to Gemini, so it doesn't answer the lyrics. With music on, the chat stays open for up to 15 quiet minutes.
+Gemini ends each connection after about 10 minutes, so the notch reconnects and carries on the same conversation.
+
+**It remembers.** Your earlier chats (the last 60 exchanges) are kept on this PC only, in
+`%APPDATA%\WindowsNotch\talk-memory.json`, so you can ask "what were we talking about?". Say "forget our conversations"
+to clear them.
 Restart and shut down are deliberately not voice actions; they stay on the buttons and gestures.
 ### Lyrics on the lock screen
 

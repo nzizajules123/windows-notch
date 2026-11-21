@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -355,6 +355,8 @@ public sealed class YouTubePlayer : IExternalPlayer, IDisposable
     }
 
     public void Mute(bool on) => Send(new { cmd = "mute", on });
+    /// <summary>Player volume 0–100 (the notch turns it down while you talk to it).</summary>
+    public void SetVolume(int v) => Send(new { cmd = "volume", v = Math.Clamp(v, 0, 100) });
 
     public void Stop()
     {

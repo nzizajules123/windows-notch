@@ -44,6 +44,19 @@ public sealed class LiveTalkService
     private bool _endAfterReply;
     /// <summary>QA: a typed first message instead of the greeting (tests actions without speaking).</summary>
     public string? FirstMessage { get; set; }
+    private Queue<string>? _scripted;
+    /// <summary>True while music plays on the PC: the conversation then stays open longer and only clear speech gets through.</summary>
+    public Func<bool>? MusicPlaying { get; set; }
+    /// <summary>One finished exchange (what you said, what the notch answered), for its memory of earlier chats.</summary>
+    public event Action<string, string>? Exchange;
+
+    private string _prompt = "";
+    private string? _resumeHandle;
+    private bool _resuming;
+    private string _turnUser = "";
+    // music gate: background level of the mic while music plays, and how long the gate stays open after you speak
+    private double _musicFloor = 800;
+    private DateTime _gateOpenUntil;
 
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
@@ -64,6 +77,25 @@ public sealed class LiveTalkService
     {
         if (Active || !HasKey) return;
         Set(TalkState.Connecting);
+        _prompt = systemPrompt;
+        _resumeHandle = null;
+        await ConnectAsync(null);
+    }
+
+    /// <summary>Gemini ends each connection after ~10 minutes: carry on in a new one, with the conversation remembered.</summary>
+    private async Task ResumeAsync()
+    {
+        var handle = _resumeHandle;
+        if (handle == null) { Stop("session time limit"); return; }
+        App.Log("live talk: reconnecting (session continues)");
+        Cleanup();
+        Set(TalkState.Connecting);
+        await ConnectAsync(handle);
+    }
+
+    private async Task ConnectAsync(string? resumeHandle)
+    {
+        _resuming = resumeHandle != null;
         _cts = new CancellationTokenSource();
         try
         {
@@ -81,7 +113,10 @@ public sealed class LiveTalkService
                         responseModalities = new[] { "AUDIO" },
                         speechConfig = new { voiceConfig = new { prebuiltVoiceConfig = new { voiceName = VoiceName } } },
                     },
-                    systemInstruction = new { parts = new[] { new { text = systemPrompt } } },
+                    systemInstruction = new { parts = new[] { new { text = _prompt } } },
+                    // long chats: older turns are summarised away instead of hitting the length limit
+                    contextWindowCompression = new { slidingWindow = new { } },
+                    sessionResumption = resumeHandle == null ? (object)new { } : new { handle = resumeHandle },
                     inputAudioTranscription = new { },
                     outputAudioTranscription = new { },
                     tools = Tools == null ? null : new object[] { new { functionDeclarations = Tools } },
@@ -162,12 +197,24 @@ public sealed class LiveTalkService
         {
             // half-duplex: while the notch talks (and a moment after), send silence so it doesn't hear itself
             var talking = _speaker?.Playing == true || DateTime.UtcNow < _mutedUntil;
+            var music = MusicPlaying?.Invoke() == true;
             var src = talking ? silence : block;
+            if (!talking && music)
+            {
+                // music from the speakers reaches the mic too: only let clearly louder sound (you, talking) through,
+                // and keep the gate open a moment so whole sentences pass
+                var rms = Rms(block);
+                if (rms > Math.Max(1400, _musicFloor * 2.2)) _gateOpenUntil = DateTime.UtcNow.AddMilliseconds(1300);
+                else _musicFloor += (rms - _musicFloor) * (rms < _musicFloor ? 0.2 : 0.05);
+                if (DateTime.UtcNow >= _gateOpenUntil) src = silence;
+            }
             var bytes = new byte[src.Length * 2];
             Buffer.BlockCopy(src, 0, bytes, 0, bytes.Length);
             _ = SendAsync(new { realtimeInput = new { audio = new { data = Convert.ToBase64String(bytes), mimeType = "audio/pcm;rate=16000" } } });
-            if (!talking && Loud(block)) _lastActivity = DateTime.UtcNow;
-            if (DateTime.UtcNow - _lastActivity > IdleLimit) Stop("quiet for a while");
+            if (!talking && src != silence && Loud(block)) _lastActivity = DateTime.UtcNow;
+            // stays open while music plays, so you can say "stop it" or carry on talking
+            var limit = music ? TimeSpan.FromMinutes(15) : IdleLimit;
+            if (DateTime.UtcNow - _lastActivity > limit) Stop("quiet for a while");
         };
         _speaker.Drained += () =>
         {
@@ -206,12 +253,25 @@ public sealed class LiveTalkService
         await SendAsync(new { toolResponse = new { functionResponses = responses } }, ignoreNulls: true);
     }
 
-    private static bool Loud(short[] b)
+    /// <summary>QA: "first || second || third" → the first now, the rest one per reply.</summary>
+    private string? NextScripted()
+    {
+        if (FirstMessage == null) return null;
+        _scripted ??= new Queue<string>(FirstMessage.Split("||", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+        if (_scripted.Count == 0) return null;
+        var first = _scripted.Dequeue();
+        _turnUser = first;
+        return first;
+    }
+
+    private static double Rms(short[] b)
     {
         double sum = 0;
         foreach (var s in b) sum += (double)s * s;
-        return Math.Sqrt(sum / b.Length) > 600;   // someone speaking near the mic
+        return Math.Sqrt(sum / b.Length);
     }
+
+    private static bool Loud(short[] b) => Rms(b) > 600;   // someone speaking near the mic
 
     private async Task ReceiveLoop(CancellationToken ct)
     {
@@ -250,11 +310,19 @@ public sealed class LiveTalkService
             _lastActivity = DateTime.UtcNow;
             StartAudio();
             if (Active) Set(TalkState.Listening);
+            if (_resuming) return;   // carrying on an existing conversation: no new greeting
             // say hi first, so you know it's listening
-            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = FirstMessage ?? "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
+            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = NextScripted() ?? "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
             return;
         }
-        if (root.TryGetProperty("goAway", out _)) { Stop("session time limit"); return; }
+        if (root.TryGetProperty("sessionResumptionUpdate", out var sru))
+        {
+            if (sru.TryGetProperty("newHandle", out var nh) && nh.ValueKind == JsonValueKind.String &&
+                (!sru.TryGetProperty("resumable", out var rs) || rs.ValueKind != JsonValueKind.False))
+                _resumeHandle = nh.GetString();
+            return;
+        }
+        if (root.TryGetProperty("goAway", out _)) { _ = ResumeAsync(); return; }
         if (root.TryGetProperty("toolCall", out var call) && call.TryGetProperty("functionCalls", out var calls))
         {
             _ = RunToolsAsync(calls.Clone());
@@ -287,12 +355,27 @@ public sealed class LiveTalkService
         }
         if (sc.TryGetProperty("outputTranscription", out var ot) && ot.TryGetProperty("text", out var mtx))
         {
-            if (_modelLine.Length == 0) _userLine.Clear();
+            if (_modelLine.Length == 0) { _turnUser = _userLine.ToString().Trim(); _userLine.Clear(); }
             _modelLine.Append(mtx.GetString());
             ModelText?.Invoke(_modelLine.ToString().Trim());
         }
         if (sc.TryGetProperty("turnComplete", out var tc) && tc.GetBoolean())
         {
+            // QA: the next typed request, a few seconds after the reply
+            if (_scripted is { Count: > 0 })
+            {
+                var next = _scripted.Dequeue();
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(6000);
+                    if (!Active) return;
+                    _turnUser = next;
+                    await SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = next } } } }, turnComplete = true } });
+                });
+            }
+            var said = _modelLine.ToString().Trim();
+            if (said.Length > 0 && _turnUser.Length > 0) Exchange?.Invoke(_turnUser, said);
+            _turnUser = "";
             _modelLine.Clear();
             // e.g. music just started: finish the sentence, then hang up so Gemini doesn't listen to the song
             if (_endAfterReply)
