@@ -124,10 +124,19 @@ object Island {
         private set
     var talk by mutableStateOf(true)
 
+    /// Live talk with Gemini: "off", "connecting", "listening" or "speaking", and the caption shown under the pill.
+    var talkState by mutableStateOf("off")
+    var talkLine by mutableStateOf<String?>(null)
+    val talking get() = talkState != "off"
+
+    /** Speaks the eyes' words out loud when the voice is on (set by the island service). */
+    var speaker: ((String) -> Unit)? = null
+
     fun say(text: String) {
         if (!talk) return
         speech = text
         speechId++
+        speaker?.invoke(text)
     }
 
     /** A short status bubble that shows even when "Eyes talk" is off (e.g. clap feedback). */

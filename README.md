@@ -276,6 +276,21 @@ music plays the eyes step aside for the artwork and equaliser, and the current l
   menu**. Android doesn't let apps restart the phone, so that step is yours. It uses the microphone (you're asked
   once) and shows a small "Listening for claps" notification. Claps are ignored while music plays, during calls and
   when the phone is locked. Nothing is recorded.
+  **Four claps** start or end a live chat.
+- **Talk with Notch 🎙** (Gemini Live): paste a free Gemini key from aistudio.google.com on the setup screen, then tap
+  the **mic** at the end of the open island's tabs, or clap four times. Talk normally; captions run under the pill.
+  - **Things you can ask:** open apps ("open WhatsApp"), play music ("play some Afrobeats" plays in the island), pause,
+    skip, "what's playing?", search the web, open a website, add a to-do with a reminder, go to the home screen, or lock
+    the phone.
+  - **Music:** the chat stays open while music plays, so you can say "stop it". Other apps' music is turned down while
+    the notch speaks.
+  - **Memory:** it remembers earlier chats; "forget our conversations" clears them.
+  - **Android limits:** it can't close other apps (it goes to the home screen instead), or restart the phone.
+  - **Where things are kept:** the key and the memory stay in the app on your phone.
+- **Voice 🔊**: the eyes read their speech bubbles out loud with your phone's own voice.
+- **Automatic updates**: the app checks GitHub every few hours. When a new version is out it downloads it, checks it
+  against GitHub's fingerprint, and shows **Update ready**. Tap **Install** and confirm in Android's installer.
+  The first time, Android asks you to allow Notch Island to install updates.
 
 Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` then `gradlew assembleRelease`.
 

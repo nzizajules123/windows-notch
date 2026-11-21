@@ -138,7 +138,9 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
         geo.hasCutout -> 76f      // time + eyes | battery %
         else -> 56f
     }
-    val ticker = lyric != null && volume == null
+    // live talk captions win over lyrics under the pill
+    val talkLine = if (Island.talking) (Island.talkLine ?: if (Island.talkState == "connecting") "🎙  Connecting…" else "🎙  Listening…") else null
+    val ticker = (talkLine != null || lyric != null) && volume == null
     val (tw, th, tr) = when (mode) {
         Mode.Intro -> Triple(pillH, pillH, pillH / 2)
         Mode.Collapsed -> when {
@@ -253,7 +255,7 @@ fun IslandRoot(geo: Geo, demo: Boolean = false) {
                 },
         ) {
             when (mode) {
-                Mode.Collapsed -> Collapsed(geo, pillH, camGap, media, accent, volume, if (ticker) lyric else null)
+                Mode.Collapsed -> Collapsed(geo, pillH, camGap, media, accent, volume, if (ticker) (talkLine ?: lyric) else null)
                 Mode.Peek -> when (val p = peek) {
                     is IslandEvent.Reminder -> ReminderCard(
                         p.item, pillH,
@@ -575,6 +577,17 @@ private fun Expanded(pillH: Float, media: MediaInfo?, accent: Color, tab: Int, s
             TabPill(Ico.Bell, "Alerts", tab == 3, badge = Island.unseenAlerts, badgeColor = Color(0xFFFF453A)) { setTab(3) }
             TabPill(Ico.Todo, "To-do", tab == 4, badge = com.windowsnotch.island.Todo.items.any { it.overdue() || (it.due != null && !it.done && it.due!! - System.currentTimeMillis() < 3600_000) },
                 badgeColor = Color(0xFFFFB020)) { setTab(4) }
+            Spacer(Modifier.weight(1f))
+            // talk with Notch (Gemini Live)
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val live = Island.talking
+            Box(
+                Modifier.size(30.dp).clip(CircleShape)
+                    .background(if (live) Color(0x33FF453A) else Glass)
+                    .border(1.dp, if (live) Color(0x66FF453A) else GlassStroke, CircleShape)
+                    .clickable { com.windowsnotch.island.TalkActivity.toggle(ctx); close() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(if (live) Ico.Close else Ico.Mic, if (live) Color(0xFFFF453A) else Fg, 15f) }
         }
         AnimatedContent(tab, transitionSpec = { (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f)) togetherWith fadeOut(tween(120)) }, label = "tab") { t ->
             when (t) {

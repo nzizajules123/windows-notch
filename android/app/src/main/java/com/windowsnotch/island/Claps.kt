@@ -216,16 +216,18 @@ class ClapService : Service() {
         val am = getSystemService(AudioManager::class.java)
         if (am.isMusicActive) return "media playing"
         if (am.mode != AudioManager.MODE_NORMAL) return "call"
+        if (TalkService.running) return "talking"   // the notch's own voice could sound like claps
         return null
     }
 
     private fun onClap(n: Int) {
         if (blocker() != null) return
-        Island.hint(when (n) { 1 -> "👏  Clap again to lock"; 2 -> "👏👏  Locking…"; else -> "👏👏👏  Power menu" })
+        Island.hint(when (n) { 1 -> "👏  Clap again to lock"; 2 -> "👏👏  Locking…"; 3 -> "👏👏👏  Power menu"; else -> "👏👏👏👏  Let's talk!" })
     }
 
     private fun onSequence(n: Int, span: Int) {
-        if (n !in 2..3 || blocker() != null) return
+        if (n !in 2..4 || blocker() != null) return
+        if (n == 4) { cooldownUntil = SystemClock.elapsedRealtime() + 4000; TalkActivity.toggle(this); return }
         val island = IslandService.instance
         if (island == null) { Island.hint("Turn on the island to use claps"); return }
         cooldownUntil = SystemClock.elapsedRealtime() + 4000

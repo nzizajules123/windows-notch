@@ -70,6 +70,7 @@ class IslandService : AccessibilityService() {
         android.os.Handler(mainLooper).postDelayed({ Island.say(Island.greeting()) }, 3600)   // after the droplet intro
         owner.start()
         Todo.init(this)
+        Voice.init(this)
         // to-do reminders: checked every 15 s; anything that came due while the island was off fires on start
         owner.lifecycleScope.launch {
             kotlinx.coroutines.delay(4000)   // after the droplet intro
@@ -79,6 +80,7 @@ class IslandService : AccessibilityService() {
                     Island.react(EyeMood.Surprised, 900)
                     kotlinx.coroutines.delay(400)
                 }
+                Updates.check(this@IslandService)   // at most every 6 hours
                 kotlinx.coroutines.delay(15_000)
             }
         }

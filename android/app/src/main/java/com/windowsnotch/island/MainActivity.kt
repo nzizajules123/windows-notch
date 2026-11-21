@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Todo.init(this)
+        Voice.init(this)
+        Updates.check(this)
+        if (intent?.getBooleanExtra("install_update", false) == true) Updates.install(this)
         enableEdgeToEdge()
         val prefs = getSharedPreferences("island", MODE_PRIVATE)
         Island.lyricsEnabled = prefs.getBoolean("lyrics", true)
@@ -89,6 +92,11 @@ class MainActivity : ComponentActivity() {
                 setTalk = { prefs.edit().putBoolean("talk", it).apply() },
                 claps = clapsOn,
                 setClaps = ::toggleClaps,
+                geminiKey = Talk.key(this),
+                saveKey = { Talk.setKey(this, it) },
+                startTalk = { TalkActivity.toggle(this) },
+                install = { Updates.install(this) },
+                checkUpdates = { Updates.check(this, force = true) },
             )
         }
     }
@@ -117,6 +125,8 @@ private fun Setup(
     lyrics: Boolean, setLyrics: (Boolean) -> Unit,
     setTalk: (Boolean) -> Unit,
     claps: Boolean, setClaps: (Boolean) -> Unit,
+    geminiKey: String, saveKey: (String) -> Unit, startTalk: () -> Unit,
+    install: () -> Unit, checkUpdates: () -> Unit,
 ) {
     var lyricsOn by androidx.compose.runtime.remember { mutableStateOf(lyrics) }
     Column(
@@ -125,6 +135,18 @@ private fun Setup(
     ) {
         Text("Notch Island", color = Fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Text("Living eyes, media with lyrics, notifications and charging animations around your front camera.", color = Dim, fontSize = 14.sp)
+
+        // a new version is downloaded and verified: one tap to install
+        Updates.readyVersion?.let { v ->
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF1E3A2A)).clickable(onClick = install).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Update ready · v$v ✨", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Tap to install. Android will ask you to confirm.", color = Dim, fontSize = 12.5.sp)
+                }
+                Text("Install", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+        }
 
         // live preview of the pill (tap the eyes in the open view to poke them)
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color(0xFF2A2D35)).padding(vertical = 26.dp), contentAlignment = Alignment.TopCenter) {
@@ -164,6 +186,47 @@ private fun Setup(
             }
             Switch(claps, setClaps, colors = SwitchDefaults.colors(checkedTrackColor = Green))
         }
+        // live talk with Gemini
+        var key by androidx.compose.runtime.remember { mutableStateOf(geminiKey) }
+        var shown by androidx.compose.runtime.remember { mutableStateOf(false) }
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp)) {
+            Text("Talk with Notch 🎙", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("A real spoken conversation (Gemini Live). Ask it to open apps, play or pause music, search, add to-dos or lock the phone. " +
+                 "It remembers earlier chats. Start it with the mic in the open island, or clap four times.", color = Dim, fontSize = 12.5.sp)
+            androidx.compose.foundation.text.BasicTextField(
+                value = key, onValueChange = { key = it }, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = Fg, fontSize = 14.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Fg),
+                visualTransformation = if (shown) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0x14FFFFFF)).padding(12.dp),
+                decorationBox = { inner -> if (key.isEmpty()) Text("Gemini API key (aistudio.google.com)", color = Faint, fontSize = 14.sp); inner() },
+            )
+            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White).clickable { saveKey(key); startTalk() }.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(if (key.isBlank()) "Save" else "Save & talk", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(if (shown) "Hide key" else "Show key", color = Dim, fontSize = 13.sp, modifier = Modifier.padding(start = 14.dp).clickable { shown = !shown })
+            }
+            Text("The key stays in this app on your phone only.", color = Faint, fontSize = 11.5.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+
+        var voiceOn by androidx.compose.runtime.remember { mutableStateOf(Voice.enabled) }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Voice 🔊", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("The eyes say their speech bubbles out loud with your phone's voice (quiet while music plays)", color = Dim, fontSize = 12.5.sp)
+            }
+            Switch(voiceOn, { voiceOn = it; Voice.set(ctx, it); if (it) { Island.talk = true; setTalk(true) } }, colors = SwitchDefaults.colors(checkedTrackColor = Green))
+        }
+
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).clickable(onClick = checkUpdates).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Updates", color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(Updates.status.ifEmpty { "v${BuildConfig.VERSION_NAME} · new versions download by themselves; tap to check now" }, color = Dim, fontSize = 12.5.sp)
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         Text("Tap the island to open it · tap outside to close · the eyes react to notifications, volume and your charger.", color = Faint, fontSize = 12.sp)
     }
