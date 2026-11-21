@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -36,6 +36,14 @@ public sealed class LiveTalkService
     public event Action<string>? ModelText;
     /// <summary>What you said (caption).</summary>
     public event Action<string>? UserText;
+
+    /// <summary>Actions Gemini may call while you talk (Gemini "functionDeclarations"). Null = talk only.</summary>
+    public object[]? Tools { get; set; }
+    /// <summary>Runs an action Gemini asked for: (name, args) → (what happened, end the conversation after the reply).</summary>
+    public Func<string, JsonElement, Task<(string result, bool endAfterReply)>>? ToolHandler { get; set; }
+    private bool _endAfterReply;
+    /// <summary>QA: a typed first message instead of the greeting (tests actions without speaking).</summary>
+    public string? FirstMessage { get; set; }
 
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
@@ -76,8 +84,10 @@ public sealed class LiveTalkService
                     systemInstruction = new { parts = new[] { new { text = systemPrompt } } },
                     inputAudioTranscription = new { },
                     outputAudioTranscription = new { },
+                    tools = Tools == null ? null : new object[] { new { functionDeclarations = Tools } },
                 },
-            });
+            }, ignoreNulls: true);
+            _endAfterReply = false;
             App.Log($"live talk: connected ({model})");
             _ = Task.Run(() => ReceiveLoop(_cts.Token));
         }
@@ -130,11 +140,13 @@ public sealed class LiveTalkService
         catch { return PreferredModels[0]; }
     }
 
-    private async Task SendAsync(object msg)
+    private static readonly JsonSerializerOptions SkipNulls = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
+    private async Task SendAsync(object msg, bool ignoreNulls = false)
     {
         var ws = _ws;
         if (ws == null || ws.State != WebSocketState.Open) return;
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(msg));
+        var bytes = Encoding.UTF8.GetBytes(ignoreNulls ? JsonSerializer.Serialize(msg, SkipNulls) : JsonSerializer.Serialize(msg));
         await _sendLock.WaitAsync();
         try { await ws.SendAsync(bytes, WebSocketMessageType.Text, true, _cts?.Token ?? default); }
         catch { }
@@ -164,6 +176,34 @@ public sealed class LiveTalkService
         };
         var err = _mic.Start();
         if (err != null) { Cleanup(); Set(TalkState.Off, err); }
+    }
+
+    /// <summary>Runs each action Gemini asked for and sends back what happened, so it can tell you.</summary>
+    private async Task RunToolsAsync(JsonElement calls)
+    {
+        var responses = new List<object>();
+        foreach (var fc in calls.EnumerateArray())
+        {
+            var name = fc.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            var id = fc.TryGetProperty("id", out var i) ? i.GetString() : null;
+            var args = fc.TryGetProperty("args", out var a) ? a : default;
+            string result;
+            try
+            {
+                if (ToolHandler == null) result = "This action isn't available.";
+                else
+                {
+                    var (r, end) = await ToolHandler(name, args);
+                    result = r;
+                    if (end) _endAfterReply = true;
+                }
+            }
+            catch (Exception ex) { result = "That didn't work: " + ex.Message; }
+            App.Log($"live talk: action {name} → {result}");
+            responses.Add(new { id, name, response = new { result } });
+        }
+        _lastActivity = DateTime.UtcNow;
+        await SendAsync(new { toolResponse = new { functionResponses = responses } }, ignoreNulls: true);
     }
 
     private static bool Loud(short[] b)
@@ -211,10 +251,15 @@ public sealed class LiveTalkService
             StartAudio();
             if (Active) Set(TalkState.Listening);
             // say hi first, so you know it's listening
-            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
+            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = FirstMessage ?? "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
             return;
         }
         if (root.TryGetProperty("goAway", out _)) { Stop("session time limit"); return; }
+        if (root.TryGetProperty("toolCall", out var call) && call.TryGetProperty("functionCalls", out var calls))
+        {
+            _ = RunToolsAsync(calls.Clone());
+            return;
+        }
         if (!root.TryGetProperty("serverContent", out var sc)) return;
 
         if (sc.TryGetProperty("interrupted", out var intr) && intr.GetBoolean())
@@ -246,7 +291,19 @@ public sealed class LiveTalkService
             _modelLine.Append(mtx.GetString());
             ModelText?.Invoke(_modelLine.ToString().Trim());
         }
-        if (sc.TryGetProperty("turnComplete", out var tc) && tc.GetBoolean()) _modelLine.Clear();
+        if (sc.TryGetProperty("turnComplete", out var tc) && tc.GetBoolean())
+        {
+            _modelLine.Clear();
+            // e.g. music just started: finish the sentence, then hang up so Gemini doesn't listen to the song
+            if (_endAfterReply)
+            {
+                _ = Task.Run(async () =>
+                {
+                    for (int i = 0; i < 100 && _speaker?.Playing == true; i++) await Task.Delay(100);
+                    Stop("action done");
+                });
+            }
+        }
     }
 }
 

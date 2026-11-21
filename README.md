@@ -158,6 +158,20 @@ greets you, and you just talk.
 - **Setup:** add a Gemini API key from aistudio.google.com in the voice setup (the voice chip in Control). It's stored
   encrypted on this PC only. With a Gemini key, four claps start and stop the conversation; without one, they switch
   the speaking voice on and off.
+**Ask it to do things.** While you talk, the notch can act on your PC:
+
+| Say something like | It will |
+|---|---|
+| "Open VS Code", "open Spotify", "open my files" | open the app (anything in the Start menu, including Store apps) |
+| "Play Calm Down by Rema", "play some lofi beats" | find it on YouTube and play it in the notch's player |
+| "Pause", "next song", "go back" | control whatever is playing |
+| "What's playing?" | tell you the song |
+| "Search for flights to Kigali", "open github.com" | search the web or open a site in your browser |
+| "Remind me to call mom at 5pm" | add it to the to-do list, with a reminder |
+| "Lock my PC" | lock the PC |
+
+After it starts music, the notch says what's playing and ends the chat, so it doesn't listen to the song.
+Restart and shut down are deliberately not voice actions; they stay on the buttons and gestures.
 ### Lyrics on the lock screen
 
 When a song with synced lyrics plays, the big-clock lock / privacy screen shows the lyrics in the middle: the line being

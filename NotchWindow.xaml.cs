@@ -270,6 +270,8 @@ public partial class NotchWindow : Window
         var sayAt = Array.IndexOf(args, "--say");
         if (sayAt >= 0 && sayAt + 1 < args.Length) SayLater(args[sayAt + 1], 6000, 3000);
         // QA hook: --talk  (starts a live conversation a few seconds after launch)
+        var talkAt = Array.IndexOf(args, "--talk");
+        if (talkAt >= 0 && talkAt + 1 < args.Length && !args[talkAt + 1].StartsWith("--")) _talk.FirstMessage = args[talkAt + 1];
         if (args.Contains("--talk")) { var tt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) }; tt.Tick += (_, _) => { tt.Stop(); ToggleLiveTalk(); }; tt.Start(); }
         var demo = Array.IndexOf(args, "--demo");
         if (demo >= 0 && demo + 1 < args.Length)
@@ -3495,10 +3497,120 @@ public partial class NotchWindow : Window
     {
         _talk.ApiKey = VoiceService.Unprotect(_settings.GeminiKey);
         _talk.VoiceName = string.IsNullOrWhiteSpace(_settings.GeminiVoice) ? "Kore" : _settings.GeminiVoice;
+        _talk.Tools = LiveTools();
+        _talk.ToolHandler = (name, args) => Dispatcher.InvokeAsync(() => RunVoiceActionAsync(name, args)).Task.Unwrap();
         _talk.StateChanged += (st, msg) => Dispatcher.BeginInvoke(() => OnLiveState(st, msg));
         _talk.ModelText += t => Dispatcher.BeginInvoke(() => { _liveLine = "✨  " + Tail(t); RefreshLiveLine(); });
         _talk.UserText += t => Dispatcher.BeginInvoke(() => { _liveLine = "🗣  " + Tail(t); RefreshLiveLine(); });
         UpdateTalkUi();
+    }
+
+    // ------------------------------------------------------------------ actions Gemini can take while you talk
+    private static object Str(string description) => new { type = "STRING", description };
+
+    /// <summary>What the notch can do when you ask out loud. Restart / shut down are deliberately not here.</summary>
+    private static object[] LiveTools() => new object[]
+    {
+        new { name = "open_app", description = "Open an app on the user's Windows PC by its name (e.g. VS Code, Chrome, Spotify, WhatsApp, Word, File Explorer, Settings, Calculator).",
+              parameters = new { type = "OBJECT", properties = new { name = Str("The app's name as the user said it") }, required = new[] { "name" } } },
+        new { name = "play_music", description = "Search YouTube for a song, artist or playlist and play the top result in the notch's music player.",
+              parameters = new { type = "OBJECT", properties = new { query = Str("What to play, e.g. 'Calm Down Rema' or 'lofi beats'") }, required = new[] { "query" } } },
+        new { name = "media_control", description = "Control whatever music or video is playing on the PC.",
+              parameters = new { type = "OBJECT", properties = new { action = new { type = "STRING", description = "What to do", @enum = new[] { "play", "pause", "next", "previous" } } }, required = new[] { "action" } } },
+        new { name = "now_playing", description = "Find out what song or video is playing on the PC right now." },
+        new { name = "web_search", description = "Search the web in the user's browser.",
+              parameters = new { type = "OBJECT", properties = new { query = Str("The search") }, required = new[] { "query" } } },
+        new { name = "open_website", description = "Open a website in the user's browser.",
+              parameters = new { type = "OBJECT", properties = new { url = Str("The address, e.g. youtube.com or https://github.com") }, required = new[] { "url" } } },
+        new { name = "add_todo", description = "Add a task to the user's to-do list in the notch. Include any time in the text so a reminder is set (e.g. 'call mom at 5pm', 'stretch in 20 min').",
+              parameters = new { type = "OBJECT", properties = new { text = Str("The task in plain words, with the time if there is one") }, required = new[] { "text" } } },
+        new { name = "lock_pc", description = "Lock the PC. Only when the user clearly asks to lock it." },
+    };
+
+    private static string Arg(System.Text.Json.JsonElement args, string name) =>
+        args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString()!.Trim() : "";
+
+    /// <summary>Does what Gemini asked; the text goes back to Gemini so it can tell you what happened.</summary>
+    private async Task<(string, bool)> RunVoiceActionAsync(string name, System.Text.Json.JsonElement args)
+    {
+        switch (name)
+        {
+            case "open_app":
+            {
+                var want = Arg(args, "name");
+                var opened = want.Length == 0 ? null : AppLauncher.Open(want);
+                if (opened == null) return ($"No app called \"{want}\" was found on this PC.", false);
+                Eyes.Express(EyeMood.Happy, 1000);
+                return ($"Opened {opened}.", false);
+            }
+            case "play_music":
+            {
+                var q = Arg(args, "query");
+                if (q.Length == 0) return ("Nothing to search for.", false);
+                var list = await YouTubeSearch.SearchAsync(q);
+                if (list.Count == 0) return ($"No songs found for \"{q}\".", false);
+                _results.Clear();
+                foreach (var r in list) _results.Add(r);
+                _resultsFor = q;
+                await PlayResultAsync(0);
+                // hang up after the confirmation: otherwise Gemini would listen to the song through the mic
+                return ($"Now playing \"{list[0].Title}\" ({list[0].Channel}).", true);
+            }
+            case "media_control":
+            {
+                var action = Arg(args, "action").ToLowerInvariant();
+                var m = _media.Current;
+                if (m == null) return ("Nothing is playing or paused right now.", false);
+                switch (action)
+                {
+                    case "next": await _media.NextAsync(); return ("Skipped to the next track.", true);
+                    case "previous": await _media.PreviousAsync(); return ("Went back to the previous track.", true);
+                    case "pause":
+                        if (m.IsPlaying) await _media.PlayPauseAsync();
+                        return ("Paused.", false);
+                    default:
+                        if (!m.IsPlaying) await _media.PlayPauseAsync();
+                        return ($"Playing \"{m.Title}\".", true);
+                }
+            }
+            case "now_playing":
+            {
+                var m = _media.Current;
+                return (m == null ? "Nothing is playing." : $"\"{m.Title}\" by {(string.IsNullOrEmpty(m.Artist) ? m.AppName : m.Artist)} is {(m.IsPlaying ? "playing" : "paused")}.", false);
+            }
+            case "web_search":
+            {
+                var q = Arg(args, "query");
+                if (q.Length == 0) return ("Nothing to search for.", false);
+                OpenUrl("https://www.google.com/search?q=" + Uri.EscapeDataString(q));
+                return ($"Searched the web for \"{q}\" in the browser.", false);
+            }
+            case "open_website":
+            {
+                var u = Arg(args, "url");
+                if (u.Length == 0) return ("No address given.", false);
+                if (!u.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) u = "https://" + u.Replace(" ", "");
+                if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return ("That doesn't look like a website address.", false);
+                OpenUrl(uri.AbsoluteUri);
+                return ($"Opened {uri.Host}.", false);
+            }
+            case "add_todo":
+            {
+                var (text, due) = TodoService.Parse(Arg(args, "text"));
+                if (text.Length == 0) return ("The task was empty.", false);
+                _todo.Add(text, due);
+                UpdateTodoState();
+                Eyes.Express(EyeMood.Happy, 1000);
+                return (due is { } d ? $"Added \"{text}\" with a reminder at {d:dddd HH:mm}." : $"Added \"{text}\" to the to-do list.", false);
+            }
+            case "lock_pc":
+                _talk.Stop("locking");
+                Collapse();
+                PowerService.Lock();
+                return ("Locked.", true);
+            default:
+                return ("Unknown action.", false);
+        }
     }
 
     /// <summary>The end of a long caption, so the newest words show in the pill.</summary>
@@ -3566,6 +3678,9 @@ public partial class NotchWindow : Window
                "You are their friendly companion: warm, playful, encouraging and a little funny. " +
                "Speak naturally like a friend in a voice chat, and keep answers short (one to three sentences) unless asked for more. " +
                "Reply in the language the user speaks. " +
+               "You can act on the PC with your tools: open apps, search and play music, pause / skip music, search the web, open websites, add to-dos with reminders and lock the PC. " +
+               "When the user asks for one of these, call the tool straight away (don't ask for confirmation), then say in a few words what you did. " +
+               "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
                $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}";
     }
 
