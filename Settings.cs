@@ -35,6 +35,9 @@ public sealed class Settings
     public bool BreaksEnabled { get; set; } = false;
     public int BreakEveryMinutes { get; set; } = 120;
     public int BreakMinutes { get; set; } = 5;
+    /// <summary>A break you asked for at a set time (can't be cancelled once planned), and its length.</summary>
+    public DateTime? ScheduledBreakAt { get; set; }
+    public int ScheduledBreakMinutes { get; set; } = 5;
     /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
     public int StandbyAfterMinutes { get; set; } = 5;
     /// <summary>Show "Claude is working…" style live activity in the small pill (off: only in the Activity tab).</summary>

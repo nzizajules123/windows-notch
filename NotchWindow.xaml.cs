@@ -2103,6 +2103,15 @@ public partial class NotchWindow : Window
         var now = DateTime.Now;
         var dt = Math.Clamp((now - _lastBreakTick).TotalSeconds, 0, 5);
         _lastBreakTick = now;
+        // a break you asked for at a set time: starts then (once you're at the PC), whatever the schedule switch says
+        if (_breakUntil == null && _settings.ScheduledBreakAt is { } at && now >= at && !Native.IsSessionLocked())
+        {
+            var len = Math.Clamp(_settings.ScheduledBreakMinutes, 1, 120);
+            _settings.ScheduledBreakAt = null;
+            _settings.Save();
+            StartBreak("scheduled", len);
+            return;
+        }
         if (!_settings.BreaksEnabled || _breakUntil != null) { UpdateBreakUi(); return; }
 
         var idle = Frost.IdleTime();
@@ -2135,7 +2144,8 @@ public partial class NotchWindow : Window
 
     private void UpdateBreakUi()
     {
-        BreakRowText.Text = !_settings.BreaksEnabled ? "Breaks"
+        BreakRowText.Text = _breakUntil == null && _settings.ScheduledBreakAt is { } sb && sb > DateTime.Now ? $"Breaks · planned {sb:HH:mm}"
+            : !_settings.BreaksEnabled ? "Breaks"
             : _breakUntil != null ? "Breaks · on break now"
             : $"Breaks · next in {Fmt(UntilNextBreak)}";
         BreakSwitch.ToolTip = $"A {_settings.BreakMinutes}-minute break after every {Fmt(TimeSpan.FromMinutes(_settings.BreakEveryMinutes))} of using the PC. " +
@@ -2153,10 +2163,10 @@ public partial class NotchWindow : Window
     }
 
     /// <summary>Covers the screen for the break, starts a chat (or speaks up) and keeps you company until it's over.</summary>
-    private void StartBreak(string why)
+    private void StartBreak(string why, int? minutes = null)
     {
         if (_breakUntil != null || App.SnapshotDir != null) return;
-        var mins = Math.Max(1, _settings.BreakMinutes);
+        var mins = Math.Clamp(minutes ?? _settings.BreakMinutes, 1, 120);
         _breakUntil = DateTime.Now.AddMinutes(mins);
         _breakEscapes = 0;
         App.Log($"breaks: starting a {mins}-min break ({why}, worked {_workSeconds / 60:0} min)");
@@ -2193,7 +2203,10 @@ public partial class NotchWindow : Window
         w.Show();
         UpdateBreakUi();
 
-        var note = $"(Break time: the user has been using the computer for about {_settings.BreakEveryMinutes / 60.0:0.#} hours, so a {mins}-minute break has just started. " +
+        var reason = why == "time" ? $"the user has been using the computer for about {_settings.BreakEveryMinutes / 60.0:0.#} hours, so a {mins}-minute break has just started"
+                   : why == "scheduled" ? $"the {mins}-minute break the user planned earlier has just started"
+                   : $"the user asked for a {mins}-minute break, and it has just started";
+        var note = $"(Break time: {reason}. " +
                    "Their screen is covered until it's over and they can't end it early. Tell them warmly, suggest a couple of things to do (stretch, water, rest the eyes, a short walk), " +
                    "and keep them company: chat, ask how their day is going. If they ask to end the break early, kindly say no and encourage them — you have no way to end it.)";
         if (_talk.HasKey)
@@ -3788,8 +3801,27 @@ public partial class NotchWindow : Window
                       remove_interests = new { type = "ARRAY", items = new { type = "STRING" }, description = "Interests to forget" },
                   },
               } },
+        new { name = "remember_note", description = "Save something important to remember long-term so you stay on track with the user: a goal, a plan, a project, a deadline, a decision, a preference, or what you agreed to do next. One short sentence per note.",
+              parameters = new { type = "OBJECT", properties = new { note = Str("The note, e.g. 'Studying for the maths exam on 15 December'") }, required = new[] { "note" } } },
+        new { name = "forget_note", description = "Remove a saved note that is done or no longer true (or 'all').",
+              parameters = new { type = "OBJECT", properties = new { match = Str("Words from the note to remove, or 'all'") }, required = new[] { "match" } } },
+        new { name = "search_memory", description = "Search your older conversations with the user (beyond the recent ones you already know), e.g. when they ask what you said about something before.",
+              parameters = new { type = "OBJECT", properties = new { query = Str("What to look for, e.g. 'exam' or 'birthday plan'") }, required = new[] { "query" } } },
         new { name = "break_status", description = "How long until the user's next computer break (or how much of the current break is left), and the break schedule." },
-        new { name = "take_break_now", description = "Start a computer break right now (the screen is covered for the break length). Only when the user asks for a break." },
+        new { name = "take_break_now", description = "Start a computer break right now, as long as the user wants (the screen is covered and the break can't be cancelled). Only when the user asks for a break.",
+              parameters = new { type = "OBJECT", properties = new { minutes = new { type = "INTEGER", description = "How long, in minutes (1–120). Leave out for the usual break length." } } } },
+        new { name = "schedule_break", description = "Plan a computer break for later, at a time the user chooses and for as long as they want. Once planned it can't be cancelled. Use at_time (24-hour HH:mm, e.g. 15:00) or in_minutes.",
+              parameters = new
+              {
+                  type = "OBJECT",
+                  properties = new
+                  {
+                      at_time = Str("When, as 24-hour HH:mm (e.g. 15:00). Today, or tomorrow if that time has passed."),
+                      in_minutes = new { type = "INTEGER", description = "Or: how many minutes from now" },
+                      minutes = new { type = "INTEGER", description = "Length of the break in minutes (1–120)" },
+                  },
+                  required = new[] { "minutes" },
+              } },
         new { name = "set_breaks", description = "Turn healthy computer breaks on or off, or change how often and how long they are (e.g. every 90 minutes, 10-minute breaks). There is no way to end a break early.",
               parameters = new
               {
@@ -3980,6 +4012,22 @@ public partial class NotchWindow : Window
                 if (saved.Count > 0) Eyes.Express(EyeMood.Love, 1400);
                 return (saved.Count == 0 ? "Nothing new to save." : "Saved — " + string.Join("; ", saved) + ".", false);
             }
+            case "remember_note":
+            {
+                var r = _memory.AddNote(Arg(args, "note"));
+                if (r == "Noted.") Eyes.Express(EyeMood.Happy, 900);
+                return (r, false);
+            }
+            case "forget_note":
+            {
+                var n = _memory.RemoveNotes(Arg(args, "match"));
+                return (n == 0 ? "No matching note." : $"Removed {n} note{(n == 1 ? "" : "s")}.", false);
+            }
+            case "search_memory":
+            {
+                var found = _memory.Search(Arg(args, "query"));
+                return (found.Length == 0 ? "Nothing about that in earlier conversations." : "From earlier conversations:\n" + found, false);
+            }
             case "break_status":
             {
                 if (_breakUntil is { } until)
@@ -3987,14 +4035,38 @@ public partial class NotchWindow : Window
                     var left = until - DateTime.Now;
                     return ($"On a break now: {(int)left.TotalMinutes} min {left.Seconds} s left.", false);
                 }
-                if (!_settings.BreaksEnabled) return ("Breaks are switched off.", false);
+                var planned = _settings.ScheduledBreakAt is { } pa && pa > DateTime.Now ? $" A {_settings.ScheduledBreakMinutes}-minute break is planned at {pa:HH:mm}." : "";
+                if (!_settings.BreaksEnabled) return ("Automatic breaks are switched off." + planned, false);
                 var next = UntilNextBreak;
-                return ($"Next {_settings.BreakMinutes}-minute break in {(int)next.TotalHours} h {next.Minutes} min (one every {_settings.BreakEveryMinutes} minutes of use).", false);
+                return ($"Next {_settings.BreakMinutes}-minute break in {(int)next.TotalHours} h {next.Minutes} min (one every {_settings.BreakEveryMinutes} minutes of use).{planned}", false);
             }
             case "take_break_now":
+            {
                 if (_breakUntil != null) return ("Already on a break.", false);
-                StartBreak("asked");
-                return ($"Started a {_settings.BreakMinutes}-minute break.", false);
+                int? want = args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty("minutes", out var mm) && mm.TryGetInt32(out var m) ? Math.Clamp(m, 1, 120) : null;
+                StartBreak("asked", want);
+                return ($"Started a {want ?? _settings.BreakMinutes}-minute break. It can't be cancelled.", false);
+            }
+            case "schedule_break":
+            {
+                var obj = args.ValueKind == System.Text.Json.JsonValueKind.Object;
+                var len = obj && args.TryGetProperty("minutes", out var lm) && lm.TryGetInt32(out var l) ? Math.Clamp(l, 1, 120) : _settings.BreakMinutes;
+                DateTime when;
+                if (obj && args.TryGetProperty("in_minutes", out var im) && im.TryGetInt32(out var inMin) && inMin > 0) when = DateTime.Now.AddMinutes(inMin);
+                else if (TimeSpan.TryParse(Arg(args, "at_time"), System.Globalization.CultureInfo.InvariantCulture, out var tod) && tod < TimeSpan.FromDays(1))
+                {
+                    when = DateTime.Today + tod;
+                    if (when <= DateTime.Now) when = when.AddDays(1);
+                }
+                else return ("I need a time (like 15:00) or a number of minutes from now.", false);
+                if (_settings.ScheduledBreakAt is { } old && old > DateTime.Now)
+                    return ($"There's already a {_settings.ScheduledBreakMinutes}-minute break planned at {old:HH:mm}; planned breaks can't be changed or cancelled.", false);
+                _settings.ScheduledBreakAt = when;
+                _settings.ScheduledBreakMinutes = len;
+                _settings.Save();
+                UpdateBreakUi();
+                return ($"Planned: a {len}-minute break at {when:HH:mm}{(when.Date > DateTime.Today ? " tomorrow" : "")}. It can't be cancelled.", false);
+            }
             case "set_breaks":
             {
                 if (args.ValueKind == System.Text.Json.JsonValueKind.Object)
@@ -4124,7 +4196,11 @@ public partial class NotchWindow : Window
                "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
                "Music may be playing quietly in the background while you talk: ignore song lyrics and only answer when the user speaks to you. " +
                $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}" +
-               (_memory.Count > 0 ? "\n\nYour earlier conversations with the user (oldest first). Use them to remember what you talked about; don't list them unless asked:\n" + _memory.Recent() : "");
+               "\n\nYou remember things long-term to help the user stay on track: when they mention a goal, plan, project, deadline, decision or something you agreed to do, save it with remember_note; remove notes that are done with forget_note. " +
+               "When it fits, follow up on open notes (\"how did the exam go?\"). For older conversations you don't see below, use search_memory. " +
+               "The user can ask for a break of any length now (take_break_now) or plan one for later (schedule_break); breaks can't be cancelled once started or planned." +
+               (_memory.NoteCount > 0 ? "\n\nYour notes about the user (keep these in mind):\n" + _memory.NotesText() : "") +
+               (_memory.Count > 0 ? "\n\nYour recent conversations with the user (oldest first). Use them to remember what you talked about; don't list them unless asked:\n" + _memory.Recent() : "");
     }
 
     private void VoiceChip_Click(object sender, RoutedEventArgs e)

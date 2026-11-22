@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Text.Json;
 
@@ -13,7 +13,10 @@ public sealed class TalkMemory
 {
     public sealed record Entry(DateTime T, string You, string Notch);
 
-    private const int Keep = 60;
+    private const int Keep = 300;
+    public sealed record Note(DateTime T, string Text);
+    private readonly List<Note> _notes = new();
+    private static string NotesPath => Path.Combine(App.DataDir, "talk-notes.json");
     private readonly List<Entry> _items = new();
     private readonly object _lock = new();
     private static string FilePath => Path.Combine(App.DataDir, "talk-memory.json");
@@ -26,6 +29,66 @@ public sealed class TalkMemory
                 _items.AddRange(JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(FilePath)) ?? new());
         }
         catch (Exception ex) { App.Log("talk memory: " + ex.Message); }
+        try
+        {
+            if (File.Exists(NotesPath))
+                _notes.AddRange(JsonSerializer.Deserialize<List<Note>>(File.ReadAllText(NotesPath)) ?? new());
+        }
+        catch (Exception ex) { App.Log("talk notes: " + ex.Message); }
+    }
+
+    // ------------------------------------------------------------------ long-term notes: goals, plans, projects
+    public int NoteCount { get { lock (_lock) return _notes.Count; } }
+
+    public string AddNote(string text)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return "Nothing to note.";
+        lock (_lock)
+        {
+            if (_notes.Any(n => n.Text.Equals(text, StringComparison.OrdinalIgnoreCase))) return "Already noted.";
+            _notes.Add(new Note(DateTime.Now, Trim(text, 300)));
+            while (_notes.Count > 80) _notes.RemoveAt(0);
+            SaveNotes();
+            return "Noted.";
+        }
+    }
+
+    /// <summary>Forgets notes containing <paramref name="match"/> (or all of them for "all").</summary>
+    public int RemoveNotes(string match)
+    {
+        lock (_lock)
+        {
+            var n = match.Trim().Equals("all", StringComparison.OrdinalIgnoreCase) ? _notes.RemoveAll(_ => true)
+                  : _notes.RemoveAll(x => x.Text.Contains(match.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (n > 0) SaveNotes();
+            return n;
+        }
+    }
+
+    public string NotesText()
+    {
+        lock (_lock) return string.Join("\n", _notes.Select(n => $"- ({n.T:d MMM}) {n.Text}"));
+    }
+
+    /// <summary>Older exchanges that mention any of the words (newest first), for "what did we say about…?".</summary>
+    public string Search(string query, int max = 8)
+    {
+        var words = query.ToLowerInvariant().Split(new[] { ' ', ',', '.', '?' }, StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length > 2).ToArray();
+        if (words.Length == 0) return "";
+        lock (_lock)
+        {
+            var hits = _items.Select(e => (e, score: words.Count(w => e.You.Contains(w, StringComparison.OrdinalIgnoreCase) || e.Notch.Contains(w, StringComparison.OrdinalIgnoreCase))))
+                             .Where(h => h.score > 0).OrderByDescending(h => h.score).ThenByDescending(h => h.e.T).Take(max)
+                             .OrderBy(h => h.e.T);
+            return string.Join("\n", hits.Select(h => $"[{h.e.T:ddd d MMM HH:mm}] User: {h.e.You}\n  Notch: {h.e.Notch}"));
+        }
+    }
+
+    private void SaveNotes()
+    {
+        try { File.WriteAllText(NotesPath, JsonSerializer.Serialize(_notes), Encoding.UTF8); }
+        catch (Exception ex) { App.Log("talk notes: " + ex.Message); }
     }
 
     public int Count { get { lock (_lock) return _items.Count; } }
@@ -42,11 +105,11 @@ public sealed class TalkMemory
 
     public void Clear()
     {
-        lock (_lock) { _items.Clear(); Save(); }
+        lock (_lock) { _items.Clear(); _notes.Clear(); Save(); SaveNotes(); }
     }
 
     /// <summary>The most recent exchanges as text for Gemini (newest last, at most <paramref name="maxChars"/>).</summary>
-    public string Recent(int maxChars = 4000)
+    public string Recent(int maxChars = 6000)
     {
         lock (_lock)
         {
