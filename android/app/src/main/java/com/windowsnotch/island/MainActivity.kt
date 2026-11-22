@@ -210,6 +210,22 @@ private fun Setup(
             Text("The key stays in this app on your phone only.", color = Faint, fontSize = 11.5.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
+        // what the island does by itself
+        val ctx0 = androidx.compose.ui.platform.LocalContext.current
+        @Composable fun Toggle(title: String, body: String, initial: Boolean, onChange: (Boolean) -> Unit) {
+            var on by androidx.compose.runtime.remember { mutableStateOf(initial) }
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(body, color = Dim, fontSize = 12.5.sp)
+                }
+                Switch(on, { on = it; onChange(it) }, colors = SwitchDefaults.colors(checkedTrackColor = Green))
+            }
+        }
+        Toggle("Reminders talk ⏰", "When a to-do is due, the island starts a chat, tells you the task and gives ideas", Talk.flag(ctx0, "talk_reminders", true)) { Talk.setFlag(ctx0, "talk_reminders", it) }
+        Toggle("Island starts chats 💬", "Now and then (max 3 a day, 9:00–21:00): news about your hobbies or a bit of history", Proactive.enabled(ctx0)) { Talk.setFlag(ctx0, "proactive", it) }
+        Toggle("Healthy breaks ☕", "After 2 hours of screen time, a 5-minute break you can't skip (emergency: press and hold 5 s)", Breaks.enabled(ctx0)) { Breaks.set(ctx0, on = it) }
+
         var voiceOn by androidx.compose.runtime.remember { mutableStateOf(Voice.enabled) }
         val ctx = androidx.compose.ui.platform.LocalContext.current
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

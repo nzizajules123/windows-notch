@@ -47,11 +47,17 @@ import kotlin.math.sqrt
  * microphone in the background when it was started while the app was in front; it closes straight away.
  */
 class TalkActivity : Activity() {
+    private var opening: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        opening = intent?.getStringExtra("opening")
         val go = {
-            if (TalkService.running) stopService(Intent(this, TalkService::class.java))
-            else ContextCompat.startForegroundService(this, Intent(this, TalkService::class.java))
+            when {
+                TalkService.running && opening != null -> TalkService.tell(opening!!)   // already talking: just bring it up
+                TalkService.running -> stopService(Intent(this, TalkService::class.java))
+                else -> ContextCompat.startForegroundService(this, Intent(this, TalkService::class.java).putExtra("opening", opening))
+            }
             finish()
         }
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) go()
@@ -61,20 +67,21 @@ class TalkActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
-            ContextCompat.startForegroundService(this, Intent(this, TalkService::class.java))
+            ContextCompat.startForegroundService(this, Intent(this, TalkService::class.java).putExtra("opening", opening))
         else Island.hint("Talking needs the microphone 🎙")
         finish()
     }
 
     companion object {
         /** Toggle the live chat (from the island's mic button, 4 claps or the setup screen). */
-        fun toggle(ctx: Context) {
+        /** [opening]: what the notch should start with (a due to-do, a break, news…) instead of a greeting. */
+        fun toggle(ctx: Context, opening: String? = null) {
             if (Talk.key(ctx).isBlank()) {
                 Island.hint("Add a Gemini key in the Notch Island app first 🔑")
                 ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
             }
-            runCatching { ctx.startActivity(Intent(ctx, TalkActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            runCatching { ctx.startActivity(Intent(ctx, TalkActivity::class.java).putExtra("opening", opening).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
     }
 }
@@ -95,6 +102,42 @@ object Talk {
     }
 
     fun forget(c: Context) = c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).edit().clear().apply()
+
+    // ---- who you are to the island: your name, the name you gave it, your hobbies
+    private fun prof(c: Context) = c.getSharedPreferences("profile", Context.MODE_PRIVATE)
+    fun userName(c: Context) = prof(c).getString("user", "") ?: ""
+    fun assistantName(c: Context) = prof(c).getString("assistant", "") ?: ""
+    fun interests(c: Context): List<String> = runCatching { JSONArray(prof(c).getString("interests", "[]")).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrDefault(emptyList())
+    fun saveProfile(c: Context, user: String?, assistant: String?, add: List<String>, remove: List<String>): String {
+        val saved = ArrayList<String>()
+        val e = prof(c).edit()
+        if (!user.isNullOrBlank()) { e.putString("user", user.trim()); saved.add("user's name: ${user.trim()}") }
+        if (!assistant.isNullOrBlank()) { e.putString("assistant", assistant.trim()); saved.add("your name: ${assistant.trim()}") }
+        val list = interests(c).toMutableList()
+        add.filter { it.isNotBlank() && list.none { x -> x.equals(it, true) } }.forEach { list.add(it.trim()); saved.add("interest: ${it.trim()}") }
+        remove.forEach { r -> if (list.removeAll { it.equals(r, true) }) saved.add("forgot interest: $r") }
+        e.putString("interests", JSONArray(list).toString()).apply()
+        return if (saved.isEmpty()) "Nothing new to save." else "Saved — " + saved.joinToString("; ") + "."
+    }
+
+    /** What Gemini should know about you at the start of every chat (same as on Windows). */
+    fun profilePrompt(c: Context): String {
+        val u = userName(c); val a = assistantName(c); val i = interests(c)
+        val parts = ArrayList<String>()
+        if (a.isNotBlank()) parts.add("Your name is $a — the user chose it for you, so answer to it happily.")
+        if (u.isNotBlank()) parts.add("The user's name is $u. Call them by name now and then (naturally, not in every sentence).")
+        if (i.isNotEmpty()) parts.add("They like: ${i.joinToString(", ")}. Bring these up when it fits.")
+        if (u.isBlank() || a.isBlank() || i.isEmpty())
+            parts.add("You don't know everything about them yet. Early in this chat, warmly " +
+                (if (u.isBlank()) "ask their name, " else "") + (if (a.isBlank()) "ask them to give you a name (you'd love one), " else "") +
+                (if (i.isEmpty()) "and ask what they like doing — their hobbies, " else "") +
+                "one question at a time, and save each answer with remember_profile straight away.")
+        parts.add("Whenever they mention a new hobby or interest, or want to change a name, save it with remember_profile.")
+        return parts.joinToString(" ")
+    }
+
+    fun flag(c: Context, key: String, def: Boolean) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(key, def)
+    fun setFlag(c: Context, key: String, on: Boolean) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(key, on).apply()
 
     /** Earlier exchanges as text for Gemini, newest last. */
     fun memory(c: Context, maxChars: Int = 4000): String {
@@ -122,6 +165,12 @@ class TalkService : Service() {
     companion object {
         @Volatile var running = false
             private set
+        @Volatile private var instance: TalkService? = null
+        /** Keep the chat open however quiet it gets (during a break). */
+        @Volatile var keepAlive = false
+        @Volatile private var searchBlocked = false
+        /** Tell Gemini something mid-chat (a reminder, a break event); it answers out loud. */
+        fun tell(text: String) { instance?.let { it.send(it.userTurn(text)) } }
         private const val CHANNEL = "talk"
         private val MODELS = listOf("gemini-3.1-flash-live-preview", "gemini-2.5-flash-native-audio-latest", "gemini-2.5-flash-native-audio-preview-12-2025")
         private const val MIC_RATE = 16000
@@ -144,6 +193,9 @@ class TalkService : Service() {
     private val userLine = StringBuilder()
     private var turnUser = ""
     private var musicFloor = 800.0
+    private var opening: String? = null
+    @Volatile private var heardModel = false
+    private var searchThisTime = false
     private var gateUntil = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -157,6 +209,8 @@ class TalkService : Service() {
             Island.hint("Couldn't start the microphone"); stopSelf(); return START_NOT_STICKY
         }
         running = true
+        instance = this
+        opening = intent?.getStringExtra("opening")
         setState("connecting", null)
         thread(name = "talk-connect") { connect(null) }
         return START_NOT_STICKY
@@ -165,6 +219,8 @@ class TalkService : Service() {
     override fun onDestroy() {
         stop = true
         running = false
+        instance = null
+        keepAlive = false
         runCatching { ws?.close(1000, "bye") }
         ws = null
         releaseAudio()
@@ -216,13 +272,24 @@ class TalkService : Service() {
                     .put("outputAudioTranscription", JSONObject())
                     .put("contextWindowCompression", JSONObject().put("slidingWindow", JSONObject()))
                     .put("sessionResumption", if (handle != null) JSONObject().put("handle", handle) else JSONObject())
-                    .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", tools())))
+                    .put("tools", JSONArray().apply {
+                        searchThisTime = !searchBlocked
+                        if (searchThisTime) put(JSONObject().put("googleSearch", JSONObject()))
+                        put(JSONObject().put("functionDeclarations", tools()))
+                    })
                 webSocket.send(JSONObject().put("setup", setup).toString())
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 runCatching { handle(JSONObject(text), resuming = handle != null) }.onFailure { android.util.Log.w("talk", it) }
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                // Google Search isn't allowed on this key (quota / plan): carry on without it
+                if (!stop && webSocket == ws && searchThisTime && !heardModel &&
+                    (reason.contains("quota", true) || reason.contains("search", true) || reason.contains("ground", true))) {
+                    searchBlocked = true
+                    thread(name = "talk-retry") { connect(null) }
+                    return
+                }
                 if (!stop && webSocket == ws) end(if (code == 1000 || reason.isBlank()) null else "Gemini: $reason")
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -246,14 +313,14 @@ class TalkService : Service() {
         MODELS.firstOrNull { it in live } ?: live.firstOrNull { "native-audio" in it } ?: MODELS[0]
     }.getOrDefault(MODELS[0])
 
-    private fun send(o: JSONObject) { ws?.send(o.toString()) }
+    fun send(o: JSONObject) { ws?.send(o.toString()) }
 
     private fun handle(o: JSONObject, resuming: Boolean) {
         if (o.has("setupComplete")) {
             lastActivity = SystemClock.elapsedRealtime()
             if (record == null) startAudio()
             setState("listening", null)
-            if (!resuming) send(userTurn("(The user just opened a live voice chat with you on their phone. Greet them in a few words.)"))
+            if (!resuming) send(userTurn(opening ?: "(The user just opened a live voice chat with you on their phone. Greet them in a few words.)"))
             return
         }
         o.optJSONObject("sessionResumptionUpdate")?.let { u ->
@@ -302,7 +369,7 @@ class TalkService : Service() {
         }
     }
 
-    private fun userTurn(text: String) = JSONObject().put("clientContent", JSONObject()
+    fun userTurn(text: String) = JSONObject().put("clientContent", JSONObject()
         .put("turns", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", text)))))
         .put("turnComplete", true))
 
@@ -362,7 +429,7 @@ class TalkService : Service() {
                     .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)).put("mimeType", "audio/pcm;rate=16000"))))
                 if (!talking && src !== silence && rms(buf, n) > 600) lastActivity = now
                 val limit = if (music) 15 * 60_000L else 75_000L
-                if (now - lastActivity > limit) { end("Talk ended — quiet for a while"); break }
+                if (!keepAlive && now - lastActivity > limit) { end("Talk ended — quiet for a while"); break }
                 if (Island.talkState == "speaking" && now > speakingUntil + 400) setState("listening", null)
             }
         }
@@ -371,6 +438,7 @@ class TalkService : Service() {
     private fun play(pcm: ByteArray) {
         val t = track ?: return
         lastActivity = SystemClock.elapsedRealtime()
+        heardModel = true
         val ms = pcm.size / 2 * 1000L / OUT_RATE
         val now = SystemClock.elapsedRealtime()
         speakingUntil = max(speakingUntil, now) + ms
@@ -391,7 +459,14 @@ class TalkService : Service() {
         val m = Island.media
         val media = if (m != null) " Right now \"${m.title}\" by ${m.artist} is ${if (m.playing) "playing" else "paused"}." else ""
         val mem = Talk.memory(this)
-        return "You are Notch, a cute little island with living eyes that sits at the top of the user's phone screen, around the camera. " +
+        val who = Talk.assistantName(this).ifBlank { "Notch" }
+        return "You are $who, a cute little island with living eyes that sits at the top of the user's phone screen, around the camera. " +
+            Talk.profilePrompt(this) + " " +
+            "You can search Google (if available) for fresh news about the user's interests, and you love sharing a quick bit of history now and then. " +
+            "You can write anything they ask (letters, notes, essays, lists, code) and save it as a file with write_file; write the complete text yourself and tell them where it was saved. " +
+            "When a to-do comes due, tell them about it warmly and offer two or three practical ideas or first steps, then ask if they want help. " +
+            "You look after their health with phone breaks: you can say when the next one is, start one, or change the schedule. During a break you keep them company; you can never end a break early. " +
+            "You can show or hide the privacy screen (a big clock that hides the screen). " +
             "You are their friendly companion: warm, playful, encouraging and a little funny. Speak naturally like a friend in a voice chat; " +
             "keep answers short (one to three sentences) unless asked for more. Reply in the language the user speaks. " +
             "You can act on the phone with your tools: open apps, search and play music, pause / skip music, search the web, open websites, " +
@@ -413,6 +488,14 @@ class TalkService : Service() {
         return o
     }
 
+    /** A function whose parameters are optional unless listed in [required]. */
+    private fun obj(name: String, desc: String, vararg params: Pair<String, JSONObject>, required: List<String> = emptyList()): JSONObject {
+        val props = JSONObject(); params.forEach { (k, v) -> props.put(k, v) }
+        val p = JSONObject().put("type", "OBJECT").put("properties", props)
+        if (required.isNotEmpty()) p.put("required", JSONArray(required))
+        return JSONObject().put("name", name).put("description", desc).put("parameters", p)
+    }
+
     private fun tools() = JSONArray()
         .put(fn("open_app", "Open an app on the phone by its name (e.g. WhatsApp, YouTube, Camera, Spotify, Settings, Chrome).", "name" to str("The app's name as the user said it")))
         .put(fn("play_music", "Search YouTube for a song, artist or playlist and play the top result in the island's music player.", "query" to str("What to play")))
@@ -424,6 +507,25 @@ class TalkService : Service() {
         .put(fn("add_todo", "Add a task to the island's to-do list. Include any time in the text so a reminder is set (e.g. 'call mom at 5pm').", "text" to str("The task with its time, if any")))
         .put(fn("go_home", "Go to the home screen (closes what's in front)."))
         .put(fn("lock_phone", "Lock the phone. Only when the user clearly asks to lock it."))
+        .put(obj("remember_profile", "Save what you learn about the user: their name, the name they give you, their hobbies / interests (or remove ones they no longer have). Call it as soon as they tell you.",
+            "user_name" to str("The user's name, as they want to be called"),
+            "assistant_name" to str("The name the user gives you"),
+            "add_interests" to JSONObject().put("type", "ARRAY").put("items", JSONObject().put("type", "STRING")).put("description", "Hobbies or interests to remember"),
+            "remove_interests" to JSONObject().put("type", "ARRAY").put("items", JSONObject().put("type", "STRING")).put("description", "Interests to forget")))
+        .put(obj("write_file", "Write something the user asked for (letter, email, essay, notes, a list, code…) and save it as a file in the phone's storage. Compose the complete text yourself, nicely formatted (# headings, - bullets, **bold**). Default folder: Documents/Notch.",
+            "content" to str("The full text to write"),
+            "file_name" to str("A short file name, e.g. 'Letter to the landlord'"),
+            "folder" to str("Where to save: Documents, Download, or a sub-folder like 'Documents/Letters'"),
+            "format" to JSONObject().put("type", "STRING").put("enum", JSONArray().put("docx").put("txt").put("md").put("html").put("csv").put("json").put("py")),
+            required = listOf("content", "file_name")))
+        .put(obj("privacy_screen", "Show or hide the privacy screen (a big clock that hides the phone's screen; it doesn't lock it).",
+            "on" to JSONObject().put("type", "BOOLEAN").put("description", "true = show, false = hide"), required = listOf("on")))
+        .put(fn("break_status", "How long until the user's next phone break, or how much of the current break is left."))
+        .put(fn("take_break_now", "Start a phone break right now. Only when the user asks for a break."))
+        .put(obj("set_breaks", "Turn healthy phone breaks on or off, or change how often and how long they are. There is no way to end a break early.",
+            "enabled" to JSONObject().put("type", "BOOLEAN"),
+            "every_minutes" to JSONObject().put("type", "INTEGER").put("description", "Minutes of phone use between breaks (30-240)"),
+            "break_minutes" to JSONObject().put("type", "INTEGER").put("description", "Length of each break (1-30)")))
         .put(fn("forget_memory", "Forget the earlier conversations the notch remembers. Only when the user asks."))
 
     private fun runTools(calls: JSONArray) {
@@ -509,6 +611,33 @@ class TalkService : Service() {
                 else "Locking needs the island turned on (Android 9 or newer)."
             }
             "forget_memory" -> { Talk.forget(this); "Forgot all earlier conversations." }
+            "remember_profile" -> {
+                fun list(n: String) = a.optJSONArray(n)?.let { arr -> (0 until arr.length()).map { arr.optString(it) } } ?: emptyList()
+                val r = Talk.saveProfile(this, a.optString("user_name").ifBlank { null }, a.optString("assistant_name").ifBlank { null }, list("add_interests"), list("remove_interests"))
+                if (!r.startsWith("Nothing")) Island.react(EyeMood.Love, 1400)
+                r
+            }
+            "write_file" -> runCatching {
+                val (where, uri) = FilesOut.save(this, a.optString("content"), a.optString("file_name"), a.optString("folder"), a.optString("format"))
+                FilesOut.open(this, uri)
+                Island.react(EyeMood.Happy, 1200)
+                Island.hint("Saved to $where 📄")
+                "Saved to $where on the phone."
+            }.getOrElse { "Couldn't save it: ${it.message}" }
+            "privacy_screen" -> if (a.optBoolean("on")) { if (Curtain.showPrivacy()) "The privacy screen is on. Tap it to go back." else "The privacy screen needs the island turned on." }
+                else if (Curtain.onBreak) "It's break time: the screen stays until the break is over." else { Curtain.hide(); "The privacy screen is off." }
+            "break_status" -> when {
+                Curtain.onBreak -> "On a break now."
+                !Breaks.enabled(this) -> "Breaks are switched off."
+                else -> { val ms = Breaks.untilNext(this); "Next ${Breaks.lengthMin(this)}-minute break in ${ms / 3600_000} h ${(ms / 60_000) % 60} min." }
+            }
+            "take_break_now" -> if (Breaks.start(this, "asked")) "Started a ${Breaks.lengthMin(this)}-minute break." else "Breaks need the island turned on."
+            "set_breaks" -> {
+                Breaks.set(this, on = if (a.has("enabled")) a.optBoolean("enabled") else true,
+                    every = if (a.has("every_minutes")) a.optInt("every_minutes") else null,
+                    length = if (a.has("break_minutes")) a.optInt("break_minutes") else null)
+                if (Breaks.enabled(this)) "Breaks are on: ${Breaks.lengthMin(this)} minutes after every ${Breaks.everyMin(this)} minutes of use." else "Breaks are off."
+            }
             else -> "Unknown action."
         }
     }

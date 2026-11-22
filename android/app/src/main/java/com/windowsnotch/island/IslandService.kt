@@ -74,12 +74,16 @@ class IslandService : AccessibilityService() {
         // to-do reminders: checked every 15 s; anything that came due while the island was off fires on start
         owner.lifecycleScope.launch {
             kotlinx.coroutines.delay(4000)   // after the droplet intro
+            var loops = 0
             while (true) {
                 Todo.dueNow().forEach {
                     Island.post(IslandEvent.Reminder(it))
                     Island.react(EyeMood.Surprised, 900)
+                    talkAboutReminder(it)
                     kotlinx.coroutines.delay(400)
                 }
+                Breaks.tick(this@IslandService)
+                if (loops++ % 4 == 3) Proactive.maybe(this@IslandService)   // about once a minute
                 Updates.check(this@IslandService)   // at most every 6 hours
                 kotlinx.coroutines.delay(15_000)
             }
@@ -103,6 +107,16 @@ class IslandService : AccessibilityService() {
         p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or
             (if (on) WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
         runCatching { wm.updateViewLayout(v, p) }
+    }
+
+    /** A due to-do: the island starts a chat (or speaks up in the one going on), says the task and offers ideas. */
+    private fun talkAboutReminder(t: TodoItem) {
+        if (Talk.key(this).isBlank() || !Talk.flag(this, "talk_reminders", true)) return
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        val kg = getSystemService(android.app.KeyguardManager::class.java)
+        if (!pm.isInteractive || kg.isKeyguardLocked) return   // quiet while the phone is locked
+        val note = "(Reminder from the user's to-do list: \"${t.text}\" is due now. Tell them about it in a friendly way and give two or three short, practical ideas or first steps. Then ask if they'd like help with it.)"
+        android.os.Handler(mainLooper).postDelayed({ TalkActivity.toggle(this, note) }, 2500)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit

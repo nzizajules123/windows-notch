@@ -179,6 +179,21 @@ greets you, and you just talk.
 made directly, no Office needed. It never overwrites a file unless you ask (it saves a "(2)" copy instead), never writes
 into Windows or Program Files, and never creates programs or scripts (.exe, .bat, .ps1…).
 
+**It gets to know you 👋.** In your first chats the notch introduces itself and asks:
+- your name;
+- what you'd like to call it (give it any name you like);
+- what you enjoy doing.
+
+After that it calls you by name and remembers your hobbies; tell it anything new any time. All of this is kept on this
+PC only (`%APPDATA%\WindowsNotch\profile.json`).
+- **"Hey <its name>"** starts a conversation, like "Hey Zuri". Windows' offline speech recognizer listens only for
+  that phrase ("hey / hi / okay / hello" plus the name, or "Notch"), so nothing is recorded or sent anywhere.
+- **It starts chats too:** now and then (at most 3 a day, 9:00–21:00, only when you're at the PC and nothing is playing
+  or full screen) it greets you and shares something about one of your hobbies, or a "this day in history" fact, then
+  keeps the conversation going.
+- **Fresh news** uses Google Search when your Gemini key's plan allows it; otherwise it falls back to what Gemini knows.
+- Both can be switched off in the voice setup.
+
 **Healthy breaks ☕.** Switch on **Control → Breaks**. After 2 hours of using the PC you get a 5-minute break.
 - **How it counts:** only time you actually use the PC counts. Being away from it counts as rest, and 5 minutes away
   resets the timer.
@@ -313,6 +328,17 @@ music plays the eyes step aside for the artwork and equaliser, and the current l
   - **Android limits:** it can't close other apps (it goes to the home screen instead), or restart the phone.
   - **Where things are kept:** the key and the memory stay in the app on your phone.
 - **Voice 🔊**: the eyes read their speech bubbles out loud with your phone's own voice.
+- **It gets to know you** (same as on Windows): it asks your name, asks you to give it a name, learns your hobbies, and
+  now and then starts a chat with hobby news or a bit of history. **Reminders talk:** when a to-do is due it starts a
+  chat, says the task and gives ideas.
+- **Writes for you**: letters, notes, essays, code. It saves them as Word or text files in Documents/Notch, Download
+  or a folder you name, then opens them.
+- **Privacy screen**: "put on privacy" covers the phone with a big clock; tap to go back.
+- **Healthy breaks ☕** (switch on the setup screen): after 2 hours of screen time, a 5-minute break screen you can't
+  close early. The island keeps you company in a live chat and warns you if you try to leave. Emergency only: press
+  and hold the screen for 5 seconds.
+- No wake phrase on Android: Android has no way for an app to listen for one word in the background without a large
+  speech model. Use the mic button or four claps.
 - **Automatic updates**: the app checks GitHub every few hours. When a new version is out it downloads it, checks it
   against GitHub's fingerprint, and shows **Update ready**. Tap **Install** and confirm in Android's installer.
   The first time, Android asks you to allow Notch Island to install updates.
