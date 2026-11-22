@@ -27,6 +27,10 @@ public sealed class Settings
     public string GeminiVoice { get; set; } = "Kore";
     /// <summary>When a to-do is due, the notch starts a live chat by itself, tells you, and offers ideas (needs a Gemini key).</summary>
     public bool TalkOnReminder { get; set; } = true;
+    /// <summary>The notch starts a chat by itself now and then (hobby news, a bit of history); at most 3 a day, 9:00–21:00.</summary>
+    public bool ProactiveChats { get; set; } = true;
+    /// <summary>Say "Hey <name>" to start a conversation (offline Windows speech recognizer).</summary>
+    public bool WakeWord { get; set; } = true;
     /// <summary>Healthy breaks: after BreakEveryMinutes of using the PC, the screen is covered for BreakMinutes (can't be skipped).</summary>
     public bool BreaksEnabled { get; set; } = false;
     public int BreakEveryMinutes { get; set; } = 120;

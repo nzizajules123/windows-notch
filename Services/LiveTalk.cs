@@ -49,6 +49,10 @@ public sealed class LiveTalkService
     public Func<bool>? MusicPlaying { get; set; }
     /// <summary>Keep the chat open however quiet it gets (e.g. during a break, so the notch can keep you company).</summary>
     public bool KeepAlive { get; set; }
+    /// <summary>Let Gemini search Google (fresh news about your hobbies). Dropped automatically if the key's plan doesn't allow it.</summary>
+    public bool UseSearch { get; set; } = true;
+    private static bool _searchBlocked;
+    private bool _searchThisTime, _heardModel;
     /// <summary>One finished exchange (what you said, what the notch answered), for its memory of earlier chats.</summary>
     public event Action<string, string>? Exchange;
 
@@ -102,6 +106,7 @@ public sealed class LiveTalkService
     private async Task ConnectAsync(string? resumeHandle)
     {
         _resuming = resumeHandle != null;
+        _heardModel = false;
         _cts = new CancellationTokenSource();
         try
         {
@@ -125,7 +130,7 @@ public sealed class LiveTalkService
                     sessionResumption = resumeHandle == null ? (object)new { } : new { handle = resumeHandle },
                     inputAudioTranscription = new { },
                     outputAudioTranscription = new { },
-                    tools = Tools == null ? null : new object[] { new { functionDeclarations = Tools } },
+                    tools = BuildTools(),
                 },
             }, ignoreNulls: true);
             _endAfterReply = false;
@@ -179,6 +184,15 @@ public sealed class LiveTalkService
             return live.FirstOrDefault(n => n.Contains("native-audio")) ?? live.FirstOrDefault(n => n.Contains("live") && !n.Contains("translate") && !n.Contains("transcribe")) ?? PreferredModels[0];
         }
         catch { return PreferredModels[0]; }
+    }
+
+    private object[]? BuildTools()
+    {
+        var list = new List<object>();
+        _searchThisTime = UseSearch && !_searchBlocked;
+        if (_searchThisTime) list.Add(new { googleSearch = new { } });
+        if (Tools != null) list.Add(new { functionDeclarations = Tools });
+        return list.Count == 0 ? null : list.ToArray();
     }
 
     private static readonly JsonSerializerOptions SkipNulls = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
@@ -296,6 +310,17 @@ public sealed class LiveTalkService
                 if (r.MessageType == WebSocketMessageType.Close)
                 {
                     var why = ws.CloseStatusDescription;
+                    // Google Search isn't allowed on this key (quota / plan): carry on without it
+                    if (_searchThisTime && !_heardModel && why != null &&
+                        (why.Contains("quota", StringComparison.OrdinalIgnoreCase) || why.Contains("search", StringComparison.OrdinalIgnoreCase) || why.Contains("ground", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        App.Log("live talk: Google Search not available on this key — continuing without it");
+                        _searchBlocked = true;
+                        Cleanup();
+                        Set(TalkState.Connecting);
+                        _ = Task.Run(() => ConnectAsync(null));
+                        return;
+                    }
                     App.Log($"live talk: closed by Gemini ({ws.CloseStatus} {why})");
                     Cleanup();
                     Set(TalkState.Off, string.IsNullOrWhiteSpace(why) || ws.CloseStatus == WebSocketCloseStatus.NormalClosure ? null : "Gemini: " + why);
@@ -359,6 +384,7 @@ public sealed class LiveTalkService
             {
                 if (!p.TryGetProperty("inlineData", out var inl) || !inl.TryGetProperty("data", out var d)) continue;
                 _speaker?.Write(Convert.FromBase64String(d.GetString()!));
+                _heardModel = true;
                 _lastActivity = DateTime.UtcNow;
                 if (State == TalkState.Listening) Set(TalkState.Speaking);
             }

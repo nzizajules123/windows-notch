@@ -291,6 +291,7 @@ public partial class NotchWindow : Window
 
         // If we start while the PC is already locked, wait for the unlock event instead.
         if (_settings.ClapsEnabled && !Native.IsSessionLocked()) StartClaps();
+        SyncWakeWord();
         if (_settings.GesturesEnabled && !Native.IsSessionLocked()) await StartGesturesAsync();
         UpdateGestureUi();
 
@@ -617,6 +618,7 @@ public partial class NotchWindow : Window
         _captions.Stop();
         _gestures?.Dispose();
         _claps?.Dispose();
+        _wake?.Dispose();
         _voice.Stop();
         _talk.Stop("quit");
         _volume.Dispose();
@@ -971,6 +973,26 @@ public partial class NotchWindow : Window
     // live spoken conversation with Gemini, and the caption it shows in the pill
     private readonly LiveTalkService _talk = new();
     private readonly TalkMemory _memory = new();
+    private readonly UserProfile _profile = UserProfile.Load();
+    private WakeWord? _wake;
+
+    /// <summary>Starts (or stops) listening for "Hey &lt;name&gt;" — only when there's a Gemini key to talk with.</summary>
+    private void SyncWakeWord()
+    {
+        if (App.SnapshotDir != null) return;
+        var want = _settings.WakeWord && _talk.HasKey;
+        if (!want) { _wake?.Stop(); _wake = null; return; }
+        if (_wake != null) return;
+        _wake = new WakeWord { Strict = () => _media.Current?.IsPlaying == true };
+        _wake.Heard += _ => Dispatcher.BeginInvoke(() =>
+        {
+            if (_talk.Active || Native.IsSessionLocked()) return;
+            Eyes.Jump(1.2);
+            Eyes.Express(EyeMood.Happy, 1200);
+            ToggleLiveTalk();
+        });
+        if (!_wake.Start(_profile.AssistantName)) App.Log("wake word: " + _wake.Status);
+    }
     private bool _ducked;
     private string? _liveLine;
     private readonly DispatcherTimer _talkBob = new() { Interval = TimeSpan.FromMilliseconds(300) };
@@ -2063,6 +2085,7 @@ public partial class NotchWindow : Window
         if (_tick % 4 == 1 && !_intro && App.SnapshotDir == null) CheckReminders();
         if (_tick % 30 == 7 && !_intro && App.SnapshotDir == null) MaybeAutoInstall();
         if (_tick % 4 == 3 && !_intro && App.SnapshotDir == null) BreakTick();
+        if (_tick % 120 == 61 && !_intro && App.SnapshotDir == null) MaybeStartProactiveChat();
     }
 
     // =======================================================================
@@ -2600,6 +2623,50 @@ public partial class NotchWindow : Window
     }
 
     /// <summary>Fades the island out over fullscreen video; still opens on hover.</summary>
+    /// <summary>A game, video or presentation fills the screen in front (the notch shouldn't interrupt it).</summary>
+    private bool FullscreenAppInFront()
+    {
+        var fg = Native.GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == _hwnd || !Native.GetWindowRect(fg, out var r)) return false;
+        var cls = new System.Text.StringBuilder(64);
+        Native.GetClassName(fg, cls, cls.Capacity);
+        if (cls.ToString() is "Progman" or "WorkerW") return false;
+        var mi = new Native.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Native.MONITORINFO>() };
+        return Native.GetMonitorInfo(Native.MonitorFromWindow(fg, 2), ref mi) &&
+               r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+    }
+
+    // =======================================================================
+    //  The notch starts a chat by itself now and then: hobby news or a bit of history
+    // =======================================================================
+    private readonly DateTime _startedAt = DateTime.Now;
+
+    private void MaybeStartProactiveChat()
+    {
+        if (!_settings.ProactiveChats || !_talk.HasKey || _talk.Active || _breakUntil != null || _standby != null) return;
+        var now = DateTime.Now;
+        if (now.Hour < 9 || now.Hour >= 21 || now - _startedAt < TimeSpan.FromMinutes(10)) return;   // not at night, not right after start
+        if (_profile.ProactiveDay.Date != now.Date) { _profile.ProactiveDay = now.Date; _profile.ProactiveToday = 0; }
+        if (_profile.ProactiveToday >= 3 || now - _profile.LastProactive < TimeSpan.FromHours(3)) return;
+        // only when you're there, not typing away, nothing playing, nothing full screen, not locked
+        var idle = Frost.IdleTime();
+        if (idle < TimeSpan.FromSeconds(20) || idle > TimeSpan.FromSeconds(90)) return;
+        if (Native.IsSessionLocked() || _media.Current?.IsPlaying == true || FullscreenAppInFront() || _mode != Mode.Collapsed) return;
+
+        _profile.LastProactive = now;
+        _profile.ProactiveToday++;
+        _profile.Save();
+        var name = string.IsNullOrWhiteSpace(_profile.UserName) ? "the user" : _profile.UserName;
+        var topic = _profile.Interests.Count > 0 && Rng.Next(3) != 0
+            ? $"something new and interesting about one of their interests ({string.Join(", ", _profile.Interests)}) — if you can search Google, find a real update from the last few days; otherwise share a fun fact or tip about it"
+            : $"a short, fascinating 'on this day in history' fact for {now:d MMMM}";
+        var opening = $"(You are starting this chat yourself — {name} didn't ask. Greet them by name in a few words, then share {topic}. " +
+                      "Two or three sentences, then ask a light question to keep the conversation going. If they say they're busy, wish them well and keep it short.)";
+        App.Log("proactive chat: starting");
+        _voice.Stop();
+        _ = _talk.StartAsync(LivePrompt(), opening);
+    }
+
     private void UpdateFullscreenFade()
     {
         if (!_settings.HideInFullscreen || _mode != Mode.Collapsed || App.SnapshotDir != null || _intro) return;
@@ -3709,6 +3776,18 @@ public partial class NotchWindow : Window
                   },
                   required = new[] { "content", "file_name" },
               } },
+        new { name = "remember_profile", description = "Save what you learn about the user: their name, the name they give you, and their hobbies / interests (or remove interests they no longer have). Call it as soon as they tell you.",
+              parameters = new
+              {
+                  type = "OBJECT",
+                  properties = new
+                  {
+                      user_name = Str("The user's name, as they want to be called"),
+                      assistant_name = Str("The name the user gives you"),
+                      add_interests = new { type = "ARRAY", items = new { type = "STRING" }, description = "Hobbies or interests to remember, e.g. football, guitar, coding" },
+                      remove_interests = new { type = "ARRAY", items = new { type = "STRING" }, description = "Interests to forget" },
+                  },
+              } },
         new { name = "break_status", description = "How long until the user's next computer break (or how much of the current break is left), and the break schedule." },
         new { name = "take_break_now", description = "Start a computer break right now (the screen is covered for the break length). Only when the user asks for a break." },
         new { name = "set_breaks", description = "Turn healthy computer breaks on or off, or change how often and how long they are (e.g. every 90 minutes, 10-minute breaks). There is no way to end a break early.",
@@ -3878,6 +3957,29 @@ public partial class NotchWindow : Window
                 }
                 catch (Exception ex) { return ("Couldn't save it: " + ex.Message, false); }
             }
+            case "remember_profile":
+            {
+                var saved = new List<string>();
+                var userName = Arg(args, "user_name");
+                var botName = Arg(args, "assistant_name");
+                if (userName.Length > 0) { _profile.UserName = userName; saved.Add($"user's name: {userName}"); }
+                if (botName.Length > 0)
+                {
+                    _profile.AssistantName = botName;
+                    saved.Add($"your name: {botName}");
+                    _wake?.SetName(botName);   // "Hey <name>" works from now on
+                }
+                IEnumerable<string> List(string n) => args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty(n, out var a) && a.ValueKind == System.Text.Json.JsonValueKind.Array
+                    ? a.EnumerateArray().Where(x => x.ValueKind == System.Text.Json.JsonValueKind.String).Select(x => x.GetString()!.Trim()).Where(x => x.Length > 0)
+                    : Enumerable.Empty<string>();
+                foreach (var i in List("add_interests"))
+                    if (!_profile.Interests.Contains(i, StringComparer.OrdinalIgnoreCase)) { _profile.Interests.Add(i); saved.Add("interest: " + i); }
+                foreach (var i in List("remove_interests"))
+                    if (_profile.Interests.RemoveAll(x => x.Equals(i, StringComparison.OrdinalIgnoreCase)) > 0) saved.Add("forgot interest: " + i);
+                _profile.Save();
+                if (saved.Count > 0) Eyes.Express(EyeMood.Love, 1400);
+                return (saved.Count == 0 ? "Nothing new to save." : "Saved — " + string.Join("; ", saved) + ".", false);
+            }
             case "break_status":
             {
                 if (_breakUntil is { } until)
@@ -4005,7 +4107,10 @@ public partial class NotchWindow : Window
         var media = _media.Current is { } m ? $" Right now \"{m.Title}\" by {m.Artist} is {(m.IsPlaying ? "playing" : "paused")}." : "";
         var (pct, charging, has) = PowerService.Battery();
         var battery = has ? $" The battery is at {pct}%{(charging ? " and charging" : "")}." : "";
-        return "You are Notch, a cute little island with living eyes that sits at the top of the user's Windows screen. " +
+        var who = _profile.AssistantName is { Length: > 0 } n ? n : "Notch";
+        return $"You are {who}, a cute little island with living eyes that sits at the top of the user's Windows screen. " +
+               _profile.ForPrompt() + " " +
+               "You can search Google (if available) for fresh news about the user's interests, and you love sharing a quick bit of history now and then. " +
                "You are their friendly companion: warm, playful, encouraging and a little funny. " +
                "Speak naturally like a friend in a voice chat, and keep answers short (one to three sentences) unless asked for more. " +
                "Reply in the language the user speaks. " +
@@ -4033,9 +4138,13 @@ public partial class NotchWindow : Window
     private bool OpenVoiceSetup()
     {
         var w = new VoiceSetupWindow(_voice, VoiceService.Unprotect(_settings.VoiceKey), _settings.VoiceId,
-                                     VoiceService.Unprotect(_settings.GeminiKey), _settings.GeminiVoice, _settings.TalkOnReminder);
+                                     VoiceService.Unprotect(_settings.GeminiKey), _settings.GeminiVoice, _settings.TalkOnReminder,
+                                     _settings.ProactiveChats, _settings.WakeWord, _profile.AssistantName);
         if (w.ShowDialog() != true) return false;
         _settings.TalkOnReminder = w.TalkOnReminder;
+        _settings.ProactiveChats = w.ProactiveChats;
+        _settings.WakeWord = w.WakeWord;
+        Dispatcher.BeginInvoke(SyncWakeWord);
         _settings.GeminiKey = VoiceService.Protect(w.GeminiKey);
         _settings.GeminiVoice = w.GeminiVoice;
         _talk.ApiKey = w.GeminiKey;

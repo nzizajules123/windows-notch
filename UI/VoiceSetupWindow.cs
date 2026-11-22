@@ -24,13 +24,16 @@ public sealed class VoiceSetupWindow : Window
     public string? GeminiKey { get; private set; }
     public string GeminiVoice { get; private set; } = "Kore";
     public bool TalkOnReminder { get; private set; } = true;
-    private readonly CheckBox _remind = new();
+    public bool ProactiveChats { get; private set; } = true;
+    public bool WakeWord { get; private set; } = true;
+    private readonly CheckBox _remind = new(), _proactive = new(), _wake = new();
 
     private static readonly Brush Fg = Brushes.White;
     private static readonly Brush Dim = new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF));
     private static readonly Brush Field = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x31));
 
-    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId, string? geminiKey = null, string? geminiVoice = null, bool talkOnReminder = true)
+    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId, string? geminiKey = null, string? geminiVoice = null, bool talkOnReminder = true,
+                            bool proactive = true, bool wakeWord = true, string? assistantName = null)
     {
         _voice = voice;
         Title = "Notch voice";
@@ -84,6 +87,17 @@ public sealed class VoiceSetupWindow : Window
         _remind.Margin = new Thickness(2, 12, 0, 0);
         _remind.Content = new TextBlock { Text = "Talk to me when a to-do is due (tells me the task and gives ideas)", Foreground = Fg, FontSize = 12, TextWrapping = TextWrapping.Wrap };
         panel.Children.Add(_remind);
+        foreach (var (box, on, text) in new[]
+        {
+            (_proactive, proactive, "Let the notch start a chat now and then: news about my hobbies, a bit of history (max 3 a day, 9:00–21:00)"),
+            (_wake, wakeWord, $"Wake phrase: say \"Hey {(string.IsNullOrWhiteSpace(assistantName) ? "Notch" : assistantName)}\" to start talking (offline, nothing is recorded)"),
+        })
+        {
+            box.IsChecked = on;
+            box.Margin = new Thickness(2, 8, 0, 0);
+            box.Content = new TextBlock { Text = text, Foreground = Fg, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+            panel.Children.Add(box);
+        }
 
         _status.Foreground = Dim; _status.FontSize = 12; _status.TextWrapping = TextWrapping.Wrap; _status.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(_status);
@@ -105,6 +119,8 @@ public sealed class VoiceSetupWindow : Window
             GeminiKey = string.IsNullOrWhiteSpace(_gemKey.Password) ? null : _gemKey.Password.Trim();
             GeminiVoice = string.IsNullOrWhiteSpace(_gemVoice.Text) ? "Kore" : _gemVoice.Text.Trim();
             TalkOnReminder = _remind.IsChecked == true;
+            ProactiveChats = _proactive.IsChecked == true;
+            WakeWord = _wake.IsChecked == true;
             DialogResult = true;
             return Task.CompletedTask;
         }));
