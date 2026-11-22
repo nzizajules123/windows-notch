@@ -203,6 +203,8 @@ public partial class NotchWindow : Window
         GestureSwitch.IsChecked = _settings.GesturesEnabled;
         PreviewChip.IsChecked = _settings.ShowCameraPreview;
         ClapChip.IsChecked = _settings.ClapsEnabled;
+        BreakSwitch.IsChecked = _settings.BreaksEnabled;
+        UpdateBreakUi();
         StartupSwitch.IsChecked = PowerService.StartsWithWindows;
         InitUpdates();
 
@@ -589,6 +591,11 @@ public partial class NotchWindow : Window
                 var enc2 = new System.Windows.Media.Imaging.PngBitmapEncoder();
                 enc2.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(preview2));
                 using (var fs2 = System.IO.File.Create(System.IO.Path.Combine(dir, "15b-standby-lyrics.png"))) enc2.Save(fs2);
+                // the break screen
+                var brk = new StandbyWindow(_media, true, null, DateTime.Now.AddMinutes(4).AddSeconds(32)).RenderPreview();
+                var enc3 = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc3.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(brk));
+                using (var fs3 = System.IO.File.Create(System.IO.Path.Combine(dir, "15c-break.png"))) enc3.Save(fs3);
                 _currentLyrics = keepLyrics;
             }
             StartCountdown("Restarting", "Restart now", CancelHint(), () => { });
@@ -2055,6 +2062,139 @@ public partial class NotchWindow : Window
         if (_tick % 8 == 2) RefreshPillFrost();
         if (_tick % 4 == 1 && !_intro && App.SnapshotDir == null) CheckReminders();
         if (_tick % 30 == 7 && !_intro && App.SnapshotDir == null) MaybeAutoInstall();
+        if (_tick % 4 == 3 && !_intro && App.SnapshotDir == null) BreakTick();
+    }
+
+    // =======================================================================
+    //  Healthy breaks: after a while of using the PC, a short break you can't skip
+    // =======================================================================
+    private double _workSeconds;
+    private bool _breakWarned, _breakPostponed;
+    private DateTime? _breakUntil;
+    private DateTime _lastBreakTick = DateTime.Now;
+    private int _breakEscapes;
+
+    /// <summary>Counts the time you actually use the PC; time away counts as rest (and a long enough rest resets it).</summary>
+    private void BreakTick()
+    {
+        var now = DateTime.Now;
+        var dt = Math.Clamp((now - _lastBreakTick).TotalSeconds, 0, 5);
+        _lastBreakTick = now;
+        if (!_settings.BreaksEnabled || _breakUntil != null) { UpdateBreakUi(); return; }
+
+        var idle = Frost.IdleTime();
+        if (Native.IsSessionLocked() || idle.TotalMinutes >= Math.Max(1, _settings.BreakMinutes))
+        {
+            // you were away at least as long as a break: that counts as one
+            if (_workSeconds > 60) App.Log($"breaks: you rested ({idle.TotalMinutes:0} min away), timer reset");
+            _workSeconds = 0; _breakWarned = false; _breakPostponed = false;
+            UpdateBreakUi();
+            return;
+        }
+        if (idle.TotalSeconds < 120) _workSeconds += dt;   // reading without touching anything still counts for a bit
+
+        var total = Math.Max(5, _settings.BreakEveryMinutes) * 60.0;
+        if (!_breakWarned && _workSeconds >= total - 60)
+        {
+            _breakWarned = true;
+            var mins = _settings.BreakMinutes;
+            ShowNotif(new NotifData("Notch", "Break in 1 minute ☕", $"Save your work — a {mins}-minute break is coming", null, "", null,
+                Color.FromRgb(0x5E, 0x8B, 0xFF),
+                Act: _breakPostponed ? null : () => { _breakPostponed = true; _breakWarned = false; _workSeconds = total - 5 * 60; Say("Okay, 5 more minutes ⏳", 2400); },
+                ActLabel: _breakPostponed ? null : "5 more minutes"));
+            SayLater("Break in a minute! ☕", 600, 2600);
+        }
+        if (_workSeconds >= total) StartBreak("time");
+        if (_tick % 40 == 3) UpdateBreakUi();
+    }
+
+    private TimeSpan UntilNextBreak => TimeSpan.FromSeconds(Math.Max(0, Math.Max(5, _settings.BreakEveryMinutes) * 60.0 - _workSeconds));
+
+    private void UpdateBreakUi()
+    {
+        BreakRowText.Text = !_settings.BreaksEnabled ? "Breaks"
+            : _breakUntil != null ? "Breaks · on break now"
+            : $"Breaks · next in {Fmt(UntilNextBreak)}";
+        BreakSwitch.ToolTip = $"A {_settings.BreakMinutes}-minute break after every {Fmt(TimeSpan.FromMinutes(_settings.BreakEveryMinutes))} of using the PC. " +
+                              "The screen stays covered until it's over; the notch keeps you company. Emergency only: hold Ctrl+Shift+E for 5 seconds.";
+        static string Fmt(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes:00} m" : $"{Math.Max(1, (int)Math.Ceiling(t.TotalMinutes))} min";
+    }
+
+    private void BreakSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.BreaksEnabled = BreakSwitch.IsChecked == true;
+        _settings.Save();
+        _workSeconds = 0; _breakWarned = false; _breakPostponed = false;
+        UpdateBreakUi();
+        if (_settings.BreaksEnabled) Say($"I'll give you a {_settings.BreakMinutes}-min break every {_settings.BreakEveryMinutes / 60.0:0.#} h ☕", 3200);
+    }
+
+    /// <summary>Covers the screen for the break, starts a chat (or speaks up) and keeps you company until it's over.</summary>
+    private void StartBreak(string why)
+    {
+        if (_breakUntil != null || App.SnapshotDir != null) return;
+        var mins = Math.Max(1, _settings.BreakMinutes);
+        _breakUntil = DateTime.Now.AddMinutes(mins);
+        _breakEscapes = 0;
+        App.Log($"breaks: starting a {mins}-min break ({why}, worked {_workSeconds / 60:0} min)");
+        if (_standby != null && !_standby.IsBreak) { _standby.Dismiss("break starts"); _standby = null; }
+        if (Expanded) Collapse();
+        HideBubble();
+        StopTyping();
+
+        var w = new StandbyWindow(_media, manual: true, breakUntil: _breakUntil);
+        _standby = w;
+        w.EscapeAttempt += left => OnBreakEscape(left);
+        w.EmergencyExit += () =>
+        {
+            App.Log("breaks: ended early with the emergency keys");
+            _ = _talk.SayToModelAsync("(The user ended the break early with the emergency keys. Say you hope everything is okay, in one sentence.)");
+            _workSeconds = Math.Max(0, Math.Max(5, _settings.BreakEveryMinutes) * 60.0 - 30 * 60);   // another break in half an hour
+        };
+        w.Closed += (_, _) =>
+        {
+            if (_standby == w) _standby = null;
+            var finished = _breakUntil != null && DateTime.Now >= _breakUntil.Value.AddSeconds(-2);
+            _breakUntil = null;
+            _talk.KeepAlive = false;
+            if (finished) _workSeconds = 0;
+            _breakWarned = false; _breakPostponed = false;
+            UpdateBreakUi();
+            if (finished)
+            {
+                Eyes.Express(EyeMood.Happy, 1600);
+                if (_talk.Active) _ = _talk.SayToModelAsync("(The break is over and the screen is open again. Welcome them back in one cheerful sentence.)");
+                else SayLater(Pick("Break's over — welcome back! 💪", "Refreshed? Let's go! ✨", "Welcome back! 😊"), 500, 3000);
+            }
+        };
+        w.Show();
+        UpdateBreakUi();
+
+        var note = $"(Break time: the user has been using the computer for about {_settings.BreakEveryMinutes / 60.0:0.#} hours, so a {mins}-minute break has just started. " +
+                   "Their screen is covered until it's over and they can't end it early. Tell them warmly, suggest a couple of things to do (stretch, water, rest the eyes, a short walk), " +
+                   "and keep them company: chat, ask how their day is going. If they ask to end the break early, kindly say no and encourage them — you have no way to end it.)";
+        if (_talk.HasKey)
+        {
+            _talk.KeepAlive = true;   // stays on for the whole break
+            if (_talk.Active) _ = _talk.SayToModelAsync(note);
+            else { _voice.Stop(); _ = _talk.StartAsync(LivePrompt(), note); }
+        }
+        else _ = _voice.SpeakAsync($"Time for a {mins} minute break! Stand up, stretch, and rest your eyes. I'll open the screen again when it's over.");
+    }
+
+    /// <summary>Someone tried to close the break early: the notch says something about it (more firmly each time).</summary>
+    private void OnBreakEscape(TimeSpan left)
+    {
+        _breakEscapes++;
+        var remaining = $"{(int)left.TotalMinutes} min {left.Seconds:00} s";
+        App.Log($"breaks: escape attempt #{_breakEscapes} ({remaining} left)");
+        if (_talk.Active)
+            _ = _talk.SayToModelAsync($"(The user just tried to close the break screen early (attempt {_breakEscapes}); {remaining} of the break are left. " +
+                                      (_breakEscapes == 1 ? "Kindly tell them it isn't over yet and why the break matters." : "Be a little firmer but still friendly and playful; suggest something to do instead.") + ")");
+        else
+            _ = _voice.SpeakAsync(_breakEscapes == 1
+                ? $"Not yet! There's still {(int)Math.Ceiling(left.TotalMinutes)} minutes of break. Stretch a little."
+                : Pick("Nice try! The break isn't over.", "Hands off the keyboard, you've earned this rest.", "Still on break. Drink some water!"));
     }
 
     /// <summary>Loops that run forever but only cost anything while their element is visible.</summary>
@@ -3569,6 +3709,19 @@ public partial class NotchWindow : Window
                   },
                   required = new[] { "content", "file_name" },
               } },
+        new { name = "break_status", description = "How long until the user's next computer break (or how much of the current break is left), and the break schedule." },
+        new { name = "take_break_now", description = "Start a computer break right now (the screen is covered for the break length). Only when the user asks for a break." },
+        new { name = "set_breaks", description = "Turn healthy computer breaks on or off, or change how often and how long they are (e.g. every 90 minutes, 10-minute breaks). There is no way to end a break early.",
+              parameters = new
+              {
+                  type = "OBJECT",
+                  properties = new
+                  {
+                      enabled = new { type = "BOOLEAN", description = "Breaks on (true) or off (false)" },
+                      every_minutes = new { type = "INTEGER", description = "Minutes of computer use between breaks (30–240)" },
+                      break_minutes = new { type = "INTEGER", description = "Length of each break in minutes (1–30)" },
+                  },
+              } },
         new { name = "open_path", description = "Open a file (in its normal app) or a folder (in File Explorer), e.g. something you saved earlier.",
               parameters = new { type = "OBJECT", properties = new { path = Str("The full path, or a folder name like Desktop or Documents") }, required = new[] { "path" } } },
         new { name = "forget_memory", description = "Forget all earlier conversations the notch remembers. Only when the user asks to forget or clear the memory." },
@@ -3705,6 +3858,7 @@ public partial class NotchWindow : Window
             {
                 var on = args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty("on", out var o) && o.ValueKind == System.Text.Json.JsonValueKind.True;
                 if (on) { if (_standby == null) ShowStandby(manual: true); return ("The privacy screen is on. Say \"privacy off\", click or press a key to hide it.", false); }
+                if (_standby?.IsBreak == true) return ("It's break time: the screen stays until the break is over, and there's no way to end it early.", false);
                 _standby?.Dismiss("voice");
                 return ("The privacy screen is off.", false);
             }
@@ -3723,6 +3877,39 @@ public partial class NotchWindow : Window
                     return ($"Saved to {path}.", false);
                 }
                 catch (Exception ex) { return ("Couldn't save it: " + ex.Message, false); }
+            }
+            case "break_status":
+            {
+                if (_breakUntil is { } until)
+                {
+                    var left = until - DateTime.Now;
+                    return ($"On a break now: {(int)left.TotalMinutes} min {left.Seconds} s left.", false);
+                }
+                if (!_settings.BreaksEnabled) return ("Breaks are switched off.", false);
+                var next = UntilNextBreak;
+                return ($"Next {_settings.BreakMinutes}-minute break in {(int)next.TotalHours} h {next.Minutes} min (one every {_settings.BreakEveryMinutes} minutes of use).", false);
+            }
+            case "take_break_now":
+                if (_breakUntil != null) return ("Already on a break.", false);
+                StartBreak("asked");
+                return ($"Started a {_settings.BreakMinutes}-minute break.", false);
+            case "set_breaks":
+            {
+                if (args.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    if (args.TryGetProperty("enabled", out var en) && en.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                        _settings.BreaksEnabled = en.ValueKind == System.Text.Json.JsonValueKind.True;
+                    else _settings.BreaksEnabled = true;
+                    if (args.TryGetProperty("every_minutes", out var ev) && ev.TryGetInt32(out var every)) _settings.BreakEveryMinutes = Math.Clamp(every, 30, 240);
+                    if (args.TryGetProperty("break_minutes", out var bm) && bm.TryGetInt32(out var len)) _settings.BreakMinutes = Math.Clamp(len, 1, 30);
+                }
+                _settings.Save();
+                BreakSwitch.IsChecked = _settings.BreaksEnabled;
+        UpdateBreakUi();
+                UpdateBreakUi();
+                return (_settings.BreaksEnabled
+                    ? $"Breaks are on: {_settings.BreakMinutes} minutes after every {_settings.BreakEveryMinutes} minutes of use."
+                    : "Breaks are off.", false);
             }
             case "open_path":
             {
@@ -3826,6 +4013,8 @@ public partial class NotchWindow : Window
                "When the user asks for one of these, call the tool straight away (don't ask for confirmation), then say in a few words what you did. " +
                "You can write anything the user asks (letters, emails, essays, notes, lists, code) and save it as a file in the folder they choose with write_file; write the complete text yourself and tell them where it was saved. " +
                "When a to-do comes due, tell the user about it warmly and offer two or three practical ideas or first steps, then ask if they want help (for example writing something for it). " +
+               "You look after the user's health with computer breaks: you can tell them when the next break is, start one, or change the schedule. " +
+               "During a break you keep them company; you can never end a break early, so if they ask, kindly say no and encourage them. " +
                "You can also list and close open apps, and turn the privacy screen on or off (that only hides the screen; lock_pc really locks the PC). " +
                "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
                "Music may be playing quietly in the background while you talk: ignore song lyrics and only answer when the user speaks to you. " +

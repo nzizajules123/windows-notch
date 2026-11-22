@@ -36,11 +36,37 @@ public sealed class StandbyWindow : Window
     private readonly DispatcherTimer _lyTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private int _lyIdx = int.MinValue;
 
+    // break mode: the screen stays until the break is over (emergency: hold Ctrl+Shift+E for 5 s)
+    private readonly DateTime? _breakUntil;
+    private readonly TextBlock _breakLeft = new(), _breakTip = new(), _breakWarn = new();
+    private readonly StackPanel _breakBox = new();
+    private bool _allowClose;
+    private DateTime _lastEscape = DateTime.MinValue, _emergencySince = DateTime.MaxValue;
+    private int _tipIndex;
+    private static readonly string[] Tips =
+    {
+        "Stand up and stretch your arms and back 🧘",
+        "Look at something far away for 20 seconds — your eyes will thank you 👀",
+        "Drink a glass of water 💧",
+        "Roll your shoulders and gently turn your neck",
+        "Take five slow, deep breaths 😌",
+        "Walk around the room for a minute 🚶",
+        "Open a window and get some fresh air 🌿",
+    };
+    /// <summary>Someone clicked / pressed a key to leave the break early (time left).</summary>
+    public event Action<TimeSpan>? EscapeAttempt;
+    /// <summary>The break was ended with the emergency keys.</summary>
+    public event Action? EmergencyExit;
+    public bool IsBreak => _breakUntil != null;
+
     /// <param name="manual">opened on purpose as a privacy screen: mouse moves don't close it, only a click or a key</param>
     /// <param name="lyrics">the notch's synced lyrics for what's playing (shown big in the middle)</param>
-    public StandbyWindow(MediaService media, bool manual = false, Func<LyricsResult?>? lyrics = null)
+    /// <param name="breakUntil">a computer break: can't be closed before this time</param>
+    public StandbyWindow(MediaService media, bool manual = false, Func<LyricsResult?>? lyrics = null, DateTime? breakUntil = null)
     {
         _media = media;
+        _breakUntil = breakUntil;
+        if (breakUntil != null) { manual = true; lyrics = null; }
         _lyrics = lyrics;
         _manual = manual;
         WindowStyle = WindowStyle.None;
@@ -151,6 +177,34 @@ public sealed class StandbyWindow : Window
         _lyNow.RenderTransform = new TranslateTransform();
         root.Children.Add(_lyBox);
 
+        // 3c) break: countdown, an idea for the break, and a warning when you try to leave early
+        if (breakUntil != null)
+        {
+            _breakBox.HorizontalAlignment = HorizontalAlignment.Center;
+            _breakBox.VerticalAlignment = VerticalAlignment.Center;
+            _breakBox.Margin = new Thickness(60, Height * 0.18, 60, 0);
+            _breakBox.IsHitTestVisible = false;
+            var font = new FontFamily("Segoe UI Variable Display, Segoe UI");
+            _breakBox.Children.Add(new TextBlock
+            {
+                Text = "☕  Break time", FontFamily = font, FontSize = 26, FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF)), HorizontalAlignment = HorizontalAlignment.Center,
+            });
+            _breakLeft.FontFamily = font; _breakLeft.FontSize = 64; _breakLeft.FontWeight = FontWeights.Bold;
+            _breakLeft.HorizontalAlignment = HorizontalAlignment.Center; _breakLeft.Margin = new Thickness(0, 4, 0, 0);
+            _breakLeft.Foreground = new LinearGradientBrush(Color.FromRgb(0x7F, 0xD8, 0xFF), Color.FromRgb(0xB4, 0x8C, 0xFF), 0);
+            _breakBox.Children.Add(_breakLeft);
+            _breakTip.FontFamily = font; _breakTip.FontSize = 20; _breakTip.TextAlignment = TextAlignment.Center; _breakTip.TextWrapping = TextWrapping.Wrap;
+            _breakTip.Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)); _breakTip.Margin = new Thickness(0, 10, 0, 0);
+            _breakTip.MaxWidth = 760; _breakTip.HorizontalAlignment = HorizontalAlignment.Center;
+            _breakBox.Children.Add(_breakTip);
+            _breakWarn.FontFamily = font; _breakWarn.FontSize = 16; _breakWarn.FontWeight = FontWeights.SemiBold; _breakWarn.TextAlignment = TextAlignment.Center;
+            _breakWarn.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0xB0, 0x40)); _breakWarn.Margin = new Thickness(0, 18, 0, 0);
+            _breakWarn.HorizontalAlignment = HorizontalAlignment.Center; _breakWarn.Opacity = 0; _breakWarn.RenderTransform = new TranslateTransform();
+            _breakBox.Children.Add(_breakWarn);
+            root.Children.Add(_breakBox);
+        }
+
         // 4) battery + hint
         var foot = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 36) };
         _battery.FontSize = 13; _battery.FontWeight = FontWeights.SemiBold; _battery.Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
@@ -158,18 +212,26 @@ public sealed class StandbyWindow : Window
         foot.Children.Add(_battery);
         foot.Children.Add(new TextBlock
         {
-            Text = manual ? "Click or press any key to return" : "Move the mouse or press any key to return", FontSize = 12, Margin = new Thickness(0, 6, 0, 0),
+            Text = breakUntil != null ? "The break ends by itself  ·  emergency only: hold Ctrl+Shift+E for 5 seconds"
+                 : manual ? "Click or press any key to return" : "Move the mouse or press any key to return", FontSize = 12, Margin = new Thickness(0, 6, 0, 0),
             Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)), HorizontalAlignment = HorizontalAlignment.Center,
         });
         root.Children.Add(foot);
         Content = root;
 
-        _clock.Tick += (_, _) => Refresh();
+        _clock.Tick += (_, _) => { Refresh(); BreakTick(); };
+        if (breakUntil != null)
+        {
+            // a break can't be closed early (Alt+F4 included) and stays in front
+            Closing += (_, e) => { if (!_allowClose) e.Cancel = true; };
+            Deactivated += (_, _) => { if (!_closing) Dispatcher.BeginInvoke(() => { Topmost = false; Topmost = true; Activate(); }); };
+        }
         _lyTimer.Tick += (_, _) => RefreshLyrics();
         _media.Changed += Refresh;
         Loaded += (_, _) =>
         {
             Refresh();
+            BreakTick();
             _clock.Start();
             if (_lyrics != null) { RefreshLyrics(); _lyTimer.Start(); }
             Activate();
@@ -189,6 +251,24 @@ public sealed class StandbyWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             var k = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (_breakUntil != null)
+            {
+                e.Handled = true;
+                // emergency: hold Ctrl+Shift+E for 5 seconds
+                var mods = Keyboard.Modifiers;
+                if (k == Key.E && mods.HasFlag(ModifierKeys.Control) && mods.HasFlag(ModifierKeys.Shift))
+                {
+                    if (_emergencySince == DateTime.MaxValue) _emergencySince = DateTime.Now;
+                    var held = (DateTime.Now - _emergencySince).TotalSeconds;
+                    if (held >= 5) { EmergencyExit?.Invoke(); _allowClose = true; Dismiss("break: emergency exit"); }
+                    else Warn($"Emergency exit… keep holding ({Math.Ceiling(5 - held)} s)");
+                    return;
+                }
+                _emergencySince = DateTime.MaxValue;
+                if (k is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+                TriedToLeave();
+                return;
+            }
             if (k is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
             e.Handled = true;
             if (Settled()) Dismiss("key " + k);
@@ -197,8 +277,10 @@ public sealed class StandbyWindow : Window
         {
             if (e.OriginalSource is Border b && b.Child == _playGlyph) return;
             if (e.OriginalSource is TextBlock tb && tb == _playGlyph) return;
+            if (_breakUntil != null) { TriedToLeave(); return; }
             if (Settled()) Dismiss("click");
         };
+        PreviewKeyUp += (_, e) => { if (e.Key == Key.E) _emergencySince = DateTime.MaxValue; };
         PreviewMouseMove += (_, e) =>
         {
             if (_manual) return;
@@ -227,6 +309,65 @@ public sealed class StandbyWindow : Window
         var d = m.Duration.TotalSeconds;
         _progress.Width = d > 0 ? Math.Clamp(m.LivePosition.TotalSeconds / d, 0, 1) * _track.ActualWidth : 0;
         _card.Background = new SolidColorBrush(AccentTheme.WithAlpha(AccentTheme.Darker(m.Accent, 0.55), 0x80));
+    }
+
+    /// <summary>Counts the break down, changes the idea every 20 seconds, and closes when the break is over.</summary>
+    private void BreakTick()
+    {
+        if (_breakUntil is not { } until) return;
+        var left = until - DateTime.Now;
+        if (left <= TimeSpan.Zero)
+        {
+            _breakLeft.Text = "0:00";
+            _allowClose = true;
+            Dismiss("break over");
+            return;
+        }
+        _breakLeft.Text = $"{(int)left.TotalMinutes}:{left.Seconds:00}";
+        var tip = (int)((DateTime.Now - _shownAt).TotalSeconds / 20) % Tips.Length;
+        if (tip != _tipIndex || _breakTip.Text.Length == 0)
+        {
+            _tipIndex = tip;
+            _breakTip.Text = Tips[tip];
+            _breakTip.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(600)));
+        }
+    }
+
+    private static readonly string[] Warnings =
+    {
+        "Not yet — the break isn't over 🙂",
+        "Nice try! Your eyes and back need this 💙",
+        "Still on break. Stretch while you wait 🧘",
+        "Hands off the keyboard — you've earned these minutes ☕",
+    };
+    private int _warnCount;
+
+    private void TriedToLeave()
+    {
+        var left = (_breakUntil ?? DateTime.Now) - DateTime.Now;
+        Warn(Warnings[_warnCount++ % Warnings.Length] + $"  ·  {(int)left.TotalMinutes}:{left.Seconds:00} left");
+        if ((DateTime.Now - _lastEscape).TotalSeconds < 8) return;   // don't nag on every key press
+        _lastEscape = DateTime.Now;
+        EscapeAttempt?.Invoke(left);
+    }
+
+    private void Warn(string text)
+    {
+        _breakWarn.Text = text;
+        _breakWarn.BeginAnimation(OpacityProperty, new DoubleAnimationUsingKeyFrames
+        {
+            KeyFrames =
+            {
+                new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(120))),
+                new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(3200))),
+                new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(3800))),
+            },
+        });
+        // a little shake
+        var shake = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(420) };
+        foreach (var (x, ms) in new[] { (-10.0, 60), (9.0, 130), (-6.0, 200), (4.0, 270), (0.0, 420) })
+            shake.KeyFrames.Add(new EasingDoubleKeyFrame(x, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms))));
+        _breakWarn.RenderTransform.BeginAnimation(TranslateTransform.XProperty, shake);
     }
 
     /// <summary>Shows the line being sung, with the one before and after; a new line slides up and fades in.</summary>
@@ -260,6 +401,7 @@ public sealed class StandbyWindow : Window
     {
         Refresh();
         RefreshLyrics();
+        BreakTick();
         var root = (FrameworkElement)Content;
         var size = new Size(Width, Height);
         root.Measure(size);
@@ -275,6 +417,7 @@ public sealed class StandbyWindow : Window
     public void Dismiss(string why = "")
     {
         if (_closing) return;
+        if (_breakUntil != null && !_allowClose) return;   // breaks only end when the time is up (or by emergency)
         _closing = true;
         App.Log("standby: closing (" + why + ")");
         var a = new DoubleAnimation(0, TimeSpan.FromMilliseconds(260)) { EasingFunction = Motion.Out };

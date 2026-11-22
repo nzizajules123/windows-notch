@@ -1308,6 +1308,12 @@
                                             <CheckBox x:Name="UpdateSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="UpdateSwitch_Click"
                                                       ToolTip="Download new versions by themselves and install them while you're away"/>
                                         </Grid>
+                                        <Grid Height="27">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource SettingIcon}" Text="&#xE787;"/>
+                                            <TextBlock x:Name="BreakRowText" Grid.Column="1" Style="{StaticResource SettingLabel}" Text="Breaks"/>
+                                            <CheckBox x:Name="BreakSwitch" Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center" Click="BreakSwitch_Click"/>
+                                        </Grid>
                                     </StackPanel>
                                 </Border>
                             </Grid>

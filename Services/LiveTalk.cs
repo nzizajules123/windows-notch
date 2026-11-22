@@ -47,6 +47,8 @@ public sealed class LiveTalkService
     private Queue<string>? _scripted;
     /// <summary>True while music plays on the PC: the conversation then stays open longer and only clear speech gets through.</summary>
     public Func<bool>? MusicPlaying { get; set; }
+    /// <summary>Keep the chat open however quiet it gets (e.g. during a break, so the notch can keep you company).</summary>
+    public bool KeepAlive { get; set; }
     /// <summary>One finished exchange (what you said, what the notch answered), for its memory of earlier chats.</summary>
     public event Action<string, string>? Exchange;
 
@@ -218,7 +220,7 @@ public sealed class LiveTalkService
             if (!talking && src != silence && Loud(block)) _lastActivity = DateTime.UtcNow;
             // stays open while music plays, so you can say "stop it" or carry on talking
             var limit = music ? TimeSpan.FromMinutes(15) : IdleLimit;
-            if (DateTime.UtcNow - _lastActivity > limit) Stop("quiet for a while");
+            if (!KeepAlive && DateTime.UtcNow - _lastActivity > limit) Stop("quiet for a while");
         };
         _speaker.Drained += () =>
         {

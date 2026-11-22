@@ -179,6 +179,19 @@ greets you, and you just talk.
 made directly, no Office needed. It never overwrites a file unless you ask (it saves a "(2)" copy instead), never writes
 into Windows or Program Files, and never creates programs or scripts (.exe, .bat, .ps1…).
 
+**Healthy breaks ☕.** Switch on **Control → Breaks**. After 2 hours of using the PC you get a 5-minute break.
+- **How it counts:** only time you actually use the PC counts. Being away from it counts as rest, and 5 minutes away
+  resets the timer.
+- **Before the break:** a minute before, the notch says so; you can take **"5 more minutes"** once.
+- **During the break:** a break screen covers the PC with a countdown and ideas (stretch, water, rest your eyes). It
+  can't be closed early: clicks, keys and Alt+F4 are blocked. Each time you try, it shakes a warning and the notch says
+  something about it, more firmly each time.
+- **The notch keeps you company:** with a Gemini key it starts a live chat by itself and stays with you for the whole
+  break. It won't end the break early, however nicely you ask.
+- **Emergency only:** hold **Ctrl+Shift+E for 5 seconds**. The next break then comes after 30 minutes.
+- **By voice:** "when's my next break?", "take a break now", "breaks every 90 minutes", "make breaks 10 minutes".
+- The Breaks row shows the time until your next break.
+
 **Reminders that talk.** When a to-do is due, the notch starts a live chat by itself (or speaks up in the one you're
 having), tells you the task, gives two or three ideas or first steps, and offers to help, for example by writing
 something for it. It stays quiet while the PC is locked. Switch it off in the voice setup:
