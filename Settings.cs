@@ -25,6 +25,8 @@ public sealed class Settings
     public string? GeminiKey { get; set; }
     /// <summary>Gemini's voice for live talk (Kore, Puck, Aoede, Charon, Fenrir, Leda, Orus, Zephyr…).</summary>
     public string GeminiVoice { get; set; } = "Kore";
+    /// <summary>When a to-do is due, the notch starts a live chat by itself, tells you, and offers ideas (needs a Gemini key).</summary>
+    public bool TalkOnReminder { get; set; } = true;
     /// <summary>Show the lock-screen-style standby clock after this many idle minutes (0 = never).</summary>
     public int StandbyAfterMinutes { get; set; } = 5;
     /// <summary>Show "Claude is working…" style live activity in the small pill (off: only in the Activity tab).</summary>

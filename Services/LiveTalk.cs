@@ -51,6 +51,7 @@ public sealed class LiveTalkService
     public event Action<string, string>? Exchange;
 
     private string _prompt = "";
+    private string? _opening;
     private string? _resumeHandle;
     private bool _resuming;
     private string _turnUser = "";
@@ -73,11 +74,14 @@ public sealed class LiveTalkService
         StateChanged?.Invoke(s, msg);
     }
 
-    public async Task StartAsync(string systemPrompt)
+    /// <param name="opening">what the notch should start with (e.g. a to-do that is due), instead of a greeting</param>
+    public async Task StartAsync(string systemPrompt, string? opening = null)
     {
         if (Active || !HasKey) return;
         Set(TalkState.Connecting);
         _prompt = systemPrompt;
+        _opening = opening;
+        _scripted = null;
         _resumeHandle = null;
         await ConnectAsync(null);
     }
@@ -264,6 +268,10 @@ public sealed class LiveTalkService
         return first;
     }
 
+    /// <summary>Tells Gemini something mid-conversation (e.g. a to-do just came due); it answers out loud.</summary>
+    public Task SayToModelAsync(string text) =>
+        Active ? SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text } } } }, turnComplete = true } }) : Task.CompletedTask;
+
     private static double Rms(short[] b)
     {
         double sum = 0;
@@ -312,7 +320,7 @@ public sealed class LiveTalkService
             if (Active) Set(TalkState.Listening);
             if (_resuming) return;   // carrying on an existing conversation: no new greeting
             // say hi first, so you know it's listening
-            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = NextScripted() ?? "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
+            _ = SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text = _opening ?? NextScripted() ?? "(The user just opened a live voice chat with you. Greet them in a few words.)" } } } }, turnComplete = true } });
             return;
         }
         if (root.TryGetProperty("sessionResumptionUpdate", out var sru))

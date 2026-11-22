@@ -1645,9 +1645,28 @@ public partial class NotchWindow : Window
             Eyes.Jump(1.25);
             Eyes.Express(EyeMood.Surprised, 900);
             ShowNotif(new NotifData("Reminder", t.Text, $"Due {t.Due:HH:mm}  ·  from your to-do list", null, "", null, Color.FromRgb(0xFF, 0x9F, 0x0A), t));
-            SayLater("Reminder! ⏰", 7000, 2000);
+            if (!TalkAboutReminder(t)) SayLater("Reminder! ⏰", 7000, 2000);
         }
         UpdateTodoState();
+    }
+
+    /// <summary>When a to-do is due, the notch speaks up: it starts a live chat (or joins the one going on), tells you, and offers ideas.</summary>
+    private bool TalkAboutReminder(TodoItem t)
+    {
+        if (!_settings.TalkOnReminder || !_talk.HasKey || Native.IsSessionLocked() || App.SnapshotDir != null) return false;
+        var note = $"(Reminder from the user's to-do list: \"{t.Text}\" is due now, at {t.Due:HH:mm}. Tell them about it in a friendly way and give two or three short, practical ideas or first steps for doing it. Then ask if they'd like help with it.)";
+        if (_talk.Active) { _ = _talk.SayToModelAsync(note); return true; }
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };   // after the reminder card has popped
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop();
+            if (_talk.Active) { await _talk.SayToModelAsync(note); return; }
+            _voice.Stop();
+            App.Log("reminder: starting a live chat about it");
+            await _talk.StartAsync(LivePrompt(), note);
+        };
+        timer.Start();
+        return true;
     }
 
     private void OpenChatFromBanner(ChatThread chat)
@@ -3535,6 +3554,23 @@ public partial class NotchWindow : Window
               parameters = new { type = "OBJECT", properties = new { name = Str("The app or window name as the user said it") }, required = new[] { "name" } } },
         new { name = "privacy_screen", description = "Turn the notch's privacy screen on or off: a big clock over a blurred screen that hides what's on the PC (it does not lock it). Use for 'put on privacy', 'hide my screen', 'privacy off'.",
               parameters = new { type = "OBJECT", properties = new { on = new { type = "BOOLEAN", description = "true = show it, false = hide it" } }, required = new[] { "on" } } },
+        new { name = "write_file", description = "Write something the user asked for (a letter, email, essay, story, CV, notes, a list, code…) and save it as a file where they want. Compose the complete text yourself, nicely formatted (use # for headings, - for bullets, **bold**). Ask where to save it only if they didn't say; default is Documents\\Notch.",
+              parameters = new
+              {
+                  type = "OBJECT",
+                  properties = new
+                  {
+                      content = Str("The full text to write"),
+                      file_name = Str("A short file name, e.g. 'Letter to the landlord'. Add an extension only if the user asked for one (.txt, .md, .py…)"),
+                      folder = Str("Where to save: Desktop, Documents, Downloads, a sub-folder like 'Documents\\Letters', or a full path such as 'D:\\School'"),
+                      format = new { type = "STRING", description = "File type when the name has no extension (docx = Word, the default for letters and documents)", @enum = new[] { "docx", "txt", "md", "html", "csv", "json", "py", "js", "cs" } },
+                      overwrite = new { type = "BOOLEAN", description = "Replace an existing file with the same name. Only if the user clearly asked." },
+                      open_after = new { type = "BOOLEAN", description = "Open the file when it's saved (default true)" },
+                  },
+                  required = new[] { "content", "file_name" },
+              } },
+        new { name = "open_path", description = "Open a file (in its normal app) or a folder (in File Explorer), e.g. something you saved earlier.",
+              parameters = new { type = "OBJECT", properties = new { path = Str("The full path, or a folder name like Desktop or Documents") }, required = new[] { "path" } } },
         new { name = "forget_memory", description = "Forget all earlier conversations the notch remembers. Only when the user asks to forget or clear the memory." },
     };
 
@@ -3672,6 +3708,32 @@ public partial class NotchWindow : Window
                 _standby?.Dismiss("voice");
                 return ("The privacy screen is off.", false);
             }
+            case "write_file":
+            {
+                bool Flag(string n, bool def) => args.ValueKind == System.Text.Json.JsonValueKind.Object && args.TryGetProperty(n, out var b)
+                    ? b.ValueKind == System.Text.Json.JsonValueKind.True : def;
+                try
+                {
+                    var path = FileWriter.Save(Arg(args, "content"), Arg(args, "file_name"), Arg(args, "folder"), Arg(args, "format"), Flag("overwrite", false));
+                    if (Flag("open_after", true)) FileWriter.Open(path);
+                    Eyes.Express(EyeMood.Happy, 1200);
+                    var dir = System.IO.Path.GetDirectoryName(path) ?? "";
+                    ShowNotif(new NotifData("Notch", "Saved " + System.IO.Path.GetFileName(path), dir, null, "", null,
+                        Color.FromRgb(0x5E, 0x8B, 0xFF), Act: () => FileWriter.Open(dir), ActLabel: "Show folder"));
+                    return ($"Saved to {path}.", false);
+                }
+                catch (Exception ex) { return ("Couldn't save it: " + ex.Message, false); }
+            }
+            case "open_path":
+            {
+                var p = Arg(args, "path");
+                try
+                {
+                    var full = System.IO.File.Exists(p) || System.IO.Directory.Exists(p) ? p : FileWriter.ResolveFolder(p);
+                    return ($"Opened {FileWriter.Open(full)}.", false);
+                }
+                catch (Exception ex) { return (ex.Message, false); }
+            }
             case "forget_memory":
                 _memory.Clear();
                 return ("Forgot all earlier conversations.", false);
@@ -3762,6 +3824,8 @@ public partial class NotchWindow : Window
                "Reply in the language the user speaks. " +
                "You can act on the PC with your tools: open apps, search and play music, pause / skip music, search the web, open websites, add to-dos with reminders and lock the PC. " +
                "When the user asks for one of these, call the tool straight away (don't ask for confirmation), then say in a few words what you did. " +
+               "You can write anything the user asks (letters, emails, essays, notes, lists, code) and save it as a file in the folder they choose with write_file; write the complete text yourself and tell them where it was saved. " +
+               "When a to-do comes due, tell the user about it warmly and offer two or three practical ideas or first steps, then ask if they want help (for example writing something for it). " +
                "You can also list and close open apps, and turn the privacy screen on or off (that only hides the screen; lock_pc really locks the PC). " +
                "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
                "Music may be playing quietly in the background while you talk: ignore song lyrics and only answer when the user speaks to you. " +
@@ -3780,8 +3844,9 @@ public partial class NotchWindow : Window
     private bool OpenVoiceSetup()
     {
         var w = new VoiceSetupWindow(_voice, VoiceService.Unprotect(_settings.VoiceKey), _settings.VoiceId,
-                                     VoiceService.Unprotect(_settings.GeminiKey), _settings.GeminiVoice);
+                                     VoiceService.Unprotect(_settings.GeminiKey), _settings.GeminiVoice, _settings.TalkOnReminder);
         if (w.ShowDialog() != true) return false;
+        _settings.TalkOnReminder = w.TalkOnReminder;
         _settings.GeminiKey = VoiceService.Protect(w.GeminiKey);
         _settings.GeminiVoice = w.GeminiVoice;
         _talk.ApiKey = w.GeminiKey;

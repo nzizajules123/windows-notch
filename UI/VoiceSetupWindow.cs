@@ -23,12 +23,14 @@ public sealed class VoiceSetupWindow : Window
     public string VoiceId { get; private set; } = VoiceService.DefaultVoiceId;
     public string? GeminiKey { get; private set; }
     public string GeminiVoice { get; private set; } = "Kore";
+    public bool TalkOnReminder { get; private set; } = true;
+    private readonly CheckBox _remind = new();
 
     private static readonly Brush Fg = Brushes.White;
     private static readonly Brush Dim = new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF));
     private static readonly Brush Field = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x31));
 
-    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId, string? geminiKey = null, string? geminiVoice = null)
+    public VoiceSetupWindow(VoiceService voice, string? key, string? voiceId, string? geminiKey = null, string? geminiVoice = null, bool talkOnReminder = true)
     {
         _voice = voice;
         Title = "Notch voice";
@@ -78,6 +80,10 @@ public sealed class VoiceSetupWindow : Window
         StyleField(_gemVoice);
         _gemVoice.Text = string.IsNullOrWhiteSpace(geminiVoice) ? "Kore" : geminiVoice;
         panel.Children.Add(_gemVoice);
+        _remind.IsChecked = talkOnReminder;
+        _remind.Margin = new Thickness(2, 12, 0, 0);
+        _remind.Content = new TextBlock { Text = "Talk to me when a to-do is due (tells me the task and gives ideas)", Foreground = Fg, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(_remind);
 
         _status.Foreground = Dim; _status.FontSize = 12; _status.TextWrapping = TextWrapping.Wrap; _status.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(_status);
@@ -98,6 +104,7 @@ public sealed class VoiceSetupWindow : Window
             VoiceId = _voiceId.Text.Trim();
             GeminiKey = string.IsNullOrWhiteSpace(_gemKey.Password) ? null : _gemKey.Password.Trim();
             GeminiVoice = string.IsNullOrWhiteSpace(_gemVoice.Text) ? "Kore" : _gemVoice.Text.Trim();
+            TalkOnReminder = _remind.IsChecked == true;
             DialogResult = true;
             return Task.CompletedTask;
         }));

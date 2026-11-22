@@ -171,6 +171,18 @@ greets you, and you just talk.
 | "Search for flights to Kigali", "open github.com" | search the web or open a site in your browser |
 | "Remind me to call mom at 5pm" | add it to the to-do list, with a reminder |
 | "Lock my PC" | lock the PC |
+| "Write a letter to my landlord about the leaking tap and save it on my Desktop" | write it and save it as a Word file (or .txt, .md, code…) in the folder you name, then open it |
+| "Open that file", "open my Documents" | open a file or folder |
+
+**It writes for you.** Letters, emails, essays, CVs, notes, lists, code: say what you need and where to save it
+(Desktop, Documents, Downloads, a sub-folder like "Documents\Letters", or a full path like "D:\School"). Word files are
+made directly, no Office needed. It never overwrites a file unless you ask (it saves a "(2)" copy instead), never writes
+into Windows or Program Files, and never creates programs or scripts (.exe, .bat, .ps1…).
+
+**Reminders that talk.** When a to-do is due, the notch starts a live chat by itself (or speaks up in the one you're
+having), tells you the task, gives two or three ideas or first steps, and offers to help, for example by writing
+something for it. It stays quiet while the PC is locked. Switch it off in the voice setup:
+"Talk to me when a to-do is due".
 
 **Music and talking together.** After "play …" the chat stays open: say "stop it", "next song" or just keep talking.
 While you talk, the notch's own music plays quieter, and only your voice (clearly louder than the music) is passed
