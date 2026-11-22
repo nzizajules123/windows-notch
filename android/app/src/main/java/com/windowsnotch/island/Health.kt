@@ -201,6 +201,16 @@ object Breaks {
         val now = SystemClock.elapsedRealtime()
         val dt = if (lastTick == 0L) 0 else (now - lastTick).coerceIn(0, 60_000)
         lastTick = now
+        // a break you planned for a set time: starts then (once the phone is in use), whatever the schedule switch says
+        val p = c.getSharedPreferences("island", Context.MODE_PRIVATE)
+        val at = p.getLong("break_at", 0)
+        if (at > 0 && System.currentTimeMillis() >= at && !Curtain.onBreak &&
+            c.getSystemService(PowerManager::class.java).isInteractive && !c.getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            val len = p.getInt("break_at_len", lengthMin(c))
+            p.edit().remove("break_at").apply()
+            start(c, "scheduled", len)
+            return
+        }
         if (!enabled(c) || Curtain.onBreak) return
         val inUse = c.getSystemService(PowerManager::class.java).isInteractive &&
             !c.getSystemService(KeyguardManager::class.java).isKeyguardLocked
@@ -216,9 +226,23 @@ object Breaks {
         if (usedMs >= total) start(c, "time")
     }
 
-    fun start(c: Context, why: String): Boolean {
+    /** Plans a break at [atMillis] for [minutes]; returns false if one is already planned (planned breaks can't be changed). */
+    fun schedule(c: Context, atMillis: Long, minutes: Int): Boolean {
+        val p = c.getSharedPreferences("island", Context.MODE_PRIVATE)
+        if (p.getLong("break_at", 0) > System.currentTimeMillis()) return false
+        p.edit().putLong("break_at", atMillis).putInt("break_at_len", minutes.coerceIn(1, 120)).apply()
+        return true
+    }
+
+    fun planned(c: Context): Pair<Long, Int>? {
+        val p = c.getSharedPreferences("island", Context.MODE_PRIVATE)
+        val at = p.getLong("break_at", 0)
+        return if (at > System.currentTimeMillis()) at to p.getInt("break_at_len", 5) else null
+    }
+
+    fun start(c: Context, why: String, minutes: Int? = null): Boolean {
         if (Curtain.onBreak) return true
-        val mins = lengthMin(c)
+        val mins = (minutes ?: lengthMin(c)).coerceIn(1, 120)
         if (!Curtain.startBreak(mins)) return false
         usedMs = 0; warned = false
         TalkService.keepAlive = true
@@ -233,7 +257,12 @@ object Breaks {
                 if (TalkService.running) TalkService.tell("(The user ended the break early with the emergency press. Say you hope everything is okay, in one sentence.)")
             }
         }
-        val note = "(Break time: the user has been on their phone for about ${everyMin(c) / 60.0} hours, so a $mins-minute break has just started. " +
+        val reason = when (why) {
+            "time" -> "the user has been on their phone for about ${everyMin(c) / 60.0} hours, so a $mins-minute break has just started"
+            "scheduled" -> "the $mins-minute break the user planned earlier has just started"
+            else -> "the user asked for a $mins-minute break, and it has just started"
+        }
+        val note = "(Break time: $reason. " +
             "Their screen is covered until it's over and they can't end it early. Tell them warmly, suggest a couple of things to do (stretch, water, rest the eyes, a short walk), " +
             "and keep them company. If they ask to end the break early, kindly say no — you have no way to end it.)"
         if (Talk.key(c).isNotBlank()) TalkActivity.toggle(c, note) else Island.hint("Time for a $mins-minute break ☕")

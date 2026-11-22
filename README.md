@@ -205,7 +205,10 @@ PC only (`%APPDATA%\WindowsNotch\profile.json`).
   break. It won't end the break early, however nicely you ask.
 - **Emergency only:** hold **Ctrl+Shift+E for 5 seconds**. The next break then comes after 30 minutes.
 - **By voice:** "when's my next break?", "take a break now", "breaks every 90 minutes", "make breaks 10 minutes".
-- The Breaks row shows the time until your next break.
+- **Breaks you ask for:** "give me a 20-minute break now", or "at 15:00, give me a 15-minute break" (any length from 1 to
+  120 minutes). These work even with automatic breaks off. Once a break has started or been planned, it can't be
+  cancelled, by you or by the notch; only the emergency keys end one.
+- The Breaks row shows the time until your next break, or the planned one.
 
 **Reminders that talk.** When a to-do is due, the notch starts a live chat by itself (or speaks up in the one you're
 having), tells you the task, gives two or three ideas or first steps, and offers to help, for example by writing
@@ -217,9 +220,15 @@ While you talk, the notch's own music plays quieter, and only your voice (clearl
 to Gemini, so it doesn't answer the lyrics. With music on, the chat stays open for up to 15 quiet minutes.
 Gemini ends each connection after about 10 minutes, so the notch reconnects and carries on the same conversation.
 
-**It remembers.** Your earlier chats (the last 60 exchanges) are kept on this PC only, in
-`%APPDATA%\WindowsNotch\talk-memory.json`, so you can ask "what were we talking about?". Say "forget our conversations"
-to clear them.
+**It remembers, and keeps you on track.**
+- **Recent chats:** the last 300 exchanges are kept, and the most recent ones are part of every chat, so "what were
+  we talking about?" works.
+- **Long-term notes:** when you mention a goal, plan, project, deadline or something you agreed on ("my maths exam is
+  on 15 December"), the notch saves a short note. It keeps those notes in mind in every chat and follows up ("how did
+  the exam go?"). Finished notes are removed.
+- **Older chats:** it searches them when you ask ("what did we say about my birthday plan?").
+- **Where it's kept:** `%APPDATA%\WindowsNotch\talk-memory.json` and `talk-notes.json`, on this PC only.
+  "Forget our conversations" clears everything.
 Restart and shut down are deliberately not voice actions; they stay on the buttons and gestures.
 ### Lyrics on the lock screen
 

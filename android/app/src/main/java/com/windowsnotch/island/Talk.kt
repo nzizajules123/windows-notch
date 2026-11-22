@@ -97,11 +97,11 @@ object Talk {
         val p = c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE)
         val arr = runCatching { JSONArray(p.getString("items", "[]")) }.getOrDefault(JSONArray())
         arr.put(JSONObject().put("t", System.currentTimeMillis()).put("you", you.take(400)).put("notch", notch.take(600)))
-        while (arr.length() > 60) arr.remove(0)
+        while (arr.length() > 300) arr.remove(0)
         p.edit().putString("items", arr.toString()).apply()
     }
 
-    fun forget(c: Context) = c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).edit().clear().apply()
+    fun forget(c: Context) = c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).edit().clear().apply()   // chats and notes
 
     // ---- who you are to the island: your name, the name you gave it, your hobbies
     private fun prof(c: Context) = c.getSharedPreferences("profile", Context.MODE_PRIVATE)
@@ -140,7 +140,45 @@ object Talk {
     fun setFlag(c: Context, key: String, on: Boolean) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(key, on).apply()
 
     /** Earlier exchanges as text for Gemini, newest last. */
-    fun memory(c: Context, maxChars: Int = 4000): String {
+    // ---- long-term notes (goals, plans, deadlines) and a search over older chats
+    private fun notesArr(c: Context) = runCatching { JSONArray(c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).getString("notes", "[]")) }.getOrDefault(JSONArray())
+    fun addNote(c: Context, text: String): String {
+        val t = text.trim().take(300); if (t.isEmpty()) return "Nothing to note."
+        val arr = notesArr(c)
+        if ((0 until arr.length()).any { arr.getJSONObject(it).optString("text").equals(t, true) }) return "Already noted."
+        arr.put(JSONObject().put("t", System.currentTimeMillis()).put("text", t))
+        while (arr.length() > 80) arr.remove(0)
+        c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).edit().putString("notes", arr.toString()).apply()
+        return "Noted."
+    }
+    fun removeNotes(c: Context, match: String): Int {
+        val arr = notesArr(c); val keep = JSONArray(); var n = 0
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            if (match.trim().equals("all", true) || o.optString("text").contains(match.trim(), true)) n++ else keep.put(o)
+        }
+        c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).edit().putString("notes", keep.toString()).apply()
+        return n
+    }
+    fun notesText(c: Context): String {
+        val arr = notesArr(c); val fmt = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+        return (0 until arr.length()).joinToString("\n") { val o = arr.getJSONObject(it); "- (${fmt.format(java.util.Date(o.optLong("t")))}) ${o.optString("text")}" }
+    }
+    fun searchMemory(c: Context, query: String, max: Int = 8): String {
+        val words = query.lowercase().split(' ', ',', '.', '?').filter { it.length > 2 }
+        if (words.isEmpty()) return ""
+        val arr = runCatching { JSONArray(c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).getString("items", "[]")) }.getOrDefault(JSONArray())
+        val fmt = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault())
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .map { o -> o to words.count { w -> o.optString("you").contains(w, true) || o.optString("notch").contains(w, true) } }
+            .filter { it.second > 0 }
+            .sortedWith(compareByDescending<Pair<JSONObject, Int>> { it.second }.thenByDescending { it.first.optLong("t") })
+            .take(max).sortedBy { it.first.optLong("t") }
+            .joinToString("\n") { (o, _) -> "[${fmt.format(java.util.Date(o.optLong("t")))}] User: ${o.optString("you")}\n  Notch: ${o.optString("notch")}" }
+    }
+
+    /** Earlier exchanges as text for Gemini, newest last. */
+    fun memory(c: Context, maxChars: Int = 6000): String {
         val arr = runCatching { JSONArray(c.getSharedPreferences("talk_memory", Context.MODE_PRIVATE).getString("items", "[]")) }.getOrDefault(JSONArray())
         val fmt = java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault())
         val lines = ArrayList<String>(); var total = 0
@@ -474,7 +512,11 @@ class TalkService : Service() {
             "Android doesn't let you close other apps; offer to go to the home screen instead. You can't restart or turn off the phone. " +
             "Music may be playing quietly in the background: ignore song lyrics and only answer when the user speaks to you. " +
             "It is $now. The battery is at ${Island.battery}%${if (Island.charging) " and charging" else ""}.$media" +
-            if (mem.isNotEmpty()) "\n\nYour earlier conversations with the user (oldest first). Use them to remember what you talked about; don't list them unless asked:\n$mem" else ""
+            "\n\nYou remember things long-term to help the user stay on track: when they mention a goal, plan, project, deadline, decision or something you agreed to do, save it with remember_note; remove notes that are done with forget_note. " +
+            "When it fits, follow up on open notes. For older conversations you don't see below, use search_memory. " +
+            "The user can ask for a break of any length now (take_break_now) or plan one for later (schedule_break); breaks can't be cancelled once started or planned." +
+            Talk.notesText(this).let { if (it.isNotEmpty()) "\n\nYour notes about the user (keep these in mind):\n$it" else "" } +
+            if (mem.isNotEmpty()) "\n\nYour recent conversations with the user (oldest first). Use them to remember what you talked about; don't list them unless asked:\n$mem" else ""
     }
 
     private fun str(d: String) = JSONObject().put("type", "STRING").put("description", d)
@@ -521,7 +563,16 @@ class TalkService : Service() {
         .put(obj("privacy_screen", "Show or hide the privacy screen (a big clock that hides the phone's screen; it doesn't lock it).",
             "on" to JSONObject().put("type", "BOOLEAN").put("description", "true = show, false = hide"), required = listOf("on")))
         .put(fn("break_status", "How long until the user's next phone break, or how much of the current break is left."))
-        .put(fn("take_break_now", "Start a phone break right now. Only when the user asks for a break."))
+        .put(obj("take_break_now", "Start a phone break right now, as long as the user wants; it can't be cancelled. Only when the user asks for a break.",
+            "minutes" to JSONObject().put("type", "INTEGER").put("description", "How long (1-120). Leave out for the usual length.")))
+        .put(obj("schedule_break", "Plan a phone break for later, at a time the user chooses and for as long as they want. Once planned it can't be cancelled.",
+            "at_time" to str("When, as 24-hour HH:mm (today, or tomorrow if that time has passed)"),
+            "in_minutes" to JSONObject().put("type", "INTEGER").put("description", "Or: minutes from now"),
+            "minutes" to JSONObject().put("type", "INTEGER").put("description", "Length of the break (1-120)"), required = listOf("minutes")))
+        .put(obj("remember_note", "Save something important to remember long-term so you stay on track with the user: a goal, plan, project, deadline, decision, preference, or what you agreed to do next. One short sentence.",
+            "note" to str("The note"), required = listOf("note")))
+        .put(obj("forget_note", "Remove a saved note that is done or no longer true (or 'all').", "match" to str("Words from the note, or 'all'"), required = listOf("match")))
+        .put(obj("search_memory", "Search your older conversations with the user, e.g. when they ask what you said about something before.", "query" to str("What to look for"), required = listOf("query")))
         .put(obj("set_breaks", "Turn healthy phone breaks on or off, or change how often and how long they are. There is no way to end a break early.",
             "enabled" to JSONObject().put("type", "BOOLEAN"),
             "every_minutes" to JSONObject().put("type", "INTEGER").put("description", "Minutes of phone use between breaks (30-240)"),
@@ -630,8 +681,33 @@ class TalkService : Service() {
                 Curtain.onBreak -> "On a break now."
                 !Breaks.enabled(this) -> "Breaks are switched off."
                 else -> { val ms = Breaks.untilNext(this); "Next ${Breaks.lengthMin(this)}-minute break in ${ms / 3600_000} h ${(ms / 60_000) % 60} min." }
+            } + (Breaks.planned(this)?.let { (t, l) -> " A $l-minute break is planned at %tR.".format(t) } ?: "")
+            "take_break_now" -> {
+                val mins = if (a.has("minutes")) a.optInt("minutes").coerceIn(1, 120) else Breaks.lengthMin(this)
+                if (Breaks.start(this, "asked", mins)) "Started a $mins-minute break. It can't be cancelled." else "Breaks need the island turned on."
             }
-            "take_break_now" -> if (Breaks.start(this, "asked")) "Started a ${Breaks.lengthMin(this)}-minute break." else "Breaks need the island turned on."
+            "schedule_break" -> {
+                val mins = if (a.has("minutes")) a.optInt("minutes").coerceIn(1, 120) else Breaks.lengthMin(this)
+                val at: Long? = when {
+                    a.optInt("in_minutes", 0) > 0 -> System.currentTimeMillis() + a.optInt("in_minutes") * 60_000L
+                    Regex("^(\\d{1,2}):(\\d{2})$").find(a.optString("at_time").trim()) != null -> {
+                        val m = Regex("^(\\d{1,2}):(\\d{2})$").find(a.optString("at_time").trim())!!
+                        Calendar.getInstance().apply {
+                            set(Calendar.HOUR_OF_DAY, m.groupValues[1].toInt()); set(Calendar.MINUTE, m.groupValues[2].toInt()); set(Calendar.SECOND, 0)
+                            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+                        }.timeInMillis
+                    }
+                    else -> null
+                }
+                when {
+                    at == null -> "I need a time (like 15:00) or a number of minutes from now."
+                    !Breaks.schedule(this, at, mins) -> Breaks.planned(this)!!.let { (t, l) -> "There's already a $l-minute break planned at %tR; planned breaks can't be changed or cancelled.".format(t) }
+                    else -> "Planned: a $mins-minute break at %tR. It can't be cancelled.".format(at)
+                }
+            }
+            "remember_note" -> Talk.addNote(this, a.optString("note")).also { if (it == "Noted.") Island.react(EyeMood.Happy, 900) }
+            "forget_note" -> Talk.removeNotes(this, a.optString("match")).let { if (it == 0) "No matching note." else "Removed $it note(s)." }
+            "search_memory" -> Talk.searchMemory(this, a.optString("query")).let { if (it.isEmpty()) "Nothing about that in earlier conversations." else "From earlier conversations:\n$it" }
             "set_breaks" -> {
                 Breaks.set(this, on = if (a.has("enabled")) a.optBoolean("enabled") else true,
                     every = if (a.has("every_minutes")) a.optInt("every_minutes") else null,
