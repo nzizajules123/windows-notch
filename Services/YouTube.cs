@@ -70,22 +70,59 @@ public static class YouTubeSearch
 
     public static async Task<List<YtResult>> SearchAsync(string query, int max = 12)
     {
+        query = query.Trim();
+        if (query.Length == 0) return new();
         var q = Uri.EscapeDataString(query);
-        // "videos only" filter first; if YouTube serves a layout we can't read, try the plain results page
+        // 1) the results page, "videos only" first, then the plain page
         foreach (var url in new[] { $"https://www.youtube.com/results?search_query={q}&sp=EgIQAQ%253D%253D", $"https://www.youtube.com/results?search_query={q}" })
         {
-            for (var attempt = 0; attempt < 2; attempt++)
+            try
             {
-                try
-                {
-                    var list = Parse(await Http.GetStringAsync(url), max);
-                    if (list.Count > 0) return list;
-                    App.Log($"youtube search: 0 results from {(url.Contains("&sp=") ? "filtered" : "plain")} page (try {attempt + 1})");
-                }
-                catch (Exception ex) when (attempt == 0) { App.Log("youtube search retry: " + ex.Message); }
+                var html = await Http.GetStringAsync(url);
+                var list = Parse(html, max);
+                if (list.Count > 0) return list;
+                App.Log($"youtube search: 0 results from {(url.Contains("&sp=") ? "filtered" : "plain")} page ({Shape(html)})");
             }
+            catch (Exception ex) { App.Log("youtube search page: " + ex.Message); }
         }
+        // 2) YouTube's own search service (what youtube.com itself calls), in case the page layout can't be read
+        try
+        {
+            var list = await SearchApiAsync(query, max);
+            if (list.Count > 0) { App.Log("youtube search: results came from the search service"); return list; }
+            App.Log("youtube search: 0 results from the search service too");
+        }
+        catch (Exception ex) { App.Log("youtube search service: " + ex.Message); }
         return new();
+    }
+
+    /// <summary>A short description of a page we couldn't read, for the log (so the next layout change is easy to fix).</summary>
+    private static string Shape(string html)
+    {
+        int Count(string s) { int n = 0, i = 0; while ((i = html.IndexOf(s, i, StringComparison.Ordinal)) >= 0) { n++; i += s.Length; } return n; }
+        return $"{html.Length / 1024} KB, ytInitialData={(html.Contains("ytInitialData") ? "yes" : "no")}, videoRenderer={Count("\"videoRenderer\":{")}, " +
+               $"lockupViewModel={Count("\"lockupViewModel\":{")}, consent={(html.Contains("consent.youtube.com") ? "yes" : "no")}";
+    }
+
+    private static async Task<List<YtResult>> SearchApiAsync(string query, int max)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            context = new { client = new { clientName = "WEB", clientVersion = "2.20241120.01.00", hl = "en", gl = "US" } },
+            query,
+            @params = "EgIQAQ%3D%3D",   // videos only
+        });
+        using var req = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Add("Origin", "https://www.youtube.com");
+        using var resp = await Http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var list = new List<YtResult>();
+        Walk(doc.RootElement, list, max);
+        return list;
     }
 
     private static List<YtResult> Parse(string html, int max)
@@ -139,10 +176,57 @@ public static class YouTubeSearch
                 if (r.Id.Length > 0 && r.Length.Length > 0 && list.All(x => x.Id != r.Id)) list.Add(r);   // skip live streams
                 return;
             }
+            // YouTube's newer layout: "lockupViewModel" (contentId + lockupMetadataViewModel + a time badge on the thumbnail)
+            if (e.TryGetProperty("lockupViewModel", out var lv) && lv.TryGetProperty("contentId", out var cid))
+            {
+                var isVideo = !lv.TryGetProperty("contentType", out var ct) || ct.GetString() == "LOCKUP_CONTENT_TYPE_VIDEO";
+                var meta = lv.TryGetProperty("metadata", out var m) && m.TryGetProperty("lockupMetadataViewModel", out var lm) ? lm : default;
+                var title = meta.ValueKind == JsonValueKind.Object && meta.TryGetProperty("title", out var t) && t.TryGetProperty("content", out var tc) ? tc.GetString() ?? "" : "";
+                var r = new YtResult
+                {
+                    Id = cid.GetString() ?? "",
+                    Title = title,
+                    Channel = meta.ValueKind == JsonValueKind.Object ? FirstMetadataText(meta) : "",
+                    Length = BadgeTime(lv),
+                    ThumbUrl = $"https://i.ytimg.com/vi/{cid.GetString()}/mqdefault.jpg",
+                };
+                if (isVideo && r.Id.Length == 11 && r.Title.Length > 0 && r.Length.Length > 0 && list.All(x => x.Id != r.Id)) list.Add(r);
+                return;
+            }
             foreach (var p in e.EnumerateObject()) Walk(p.Value, list, max);
         }
         else if (e.ValueKind == JsonValueKind.Array)
             foreach (var x in e.EnumerateArray()) Walk(x, list, max);
+    }
+
+    /// <summary>The "3:40" time badge somewhere on a lockup's thumbnail ("" for live streams).</summary>
+    private static string BadgeTime(JsonElement e)
+    {
+        if (e.ValueKind == JsonValueKind.Object)
+        {
+            if (e.TryGetProperty("thumbnailBadgeViewModel", out var b) && b.TryGetProperty("text", out var tx) &&
+                tx.GetString() is { Length: > 0 } s && char.IsDigit(s[0]) && s.Contains(':'))
+                return s;
+            foreach (var p in e.EnumerateObject())
+                if (BadgeTime(p.Value) is { Length: > 0 } found) return found;
+        }
+        else if (e.ValueKind == JsonValueKind.Array)
+            foreach (var x in e.EnumerateArray())
+                if (BadgeTime(x) is { Length: > 0 } found) return found;
+        return "";
+    }
+
+    /// <summary>The channel name: the first text in a lockup's metadata rows.</summary>
+    private static string FirstMetadataText(JsonElement meta)
+    {
+        if (meta.TryGetProperty("metadata", out var md) && md.TryGetProperty("contentMetadataViewModel", out var cm) &&
+            cm.TryGetProperty("metadataRows", out var rows) && rows.ValueKind == JsonValueKind.Array)
+            foreach (var row in rows.EnumerateArray())
+                if (row.TryGetProperty("metadataParts", out var parts) && parts.ValueKind == JsonValueKind.Array)
+                    foreach (var part in parts.EnumerateArray())
+                        if (part.TryGetProperty("text", out var t) && t.TryGetProperty("content", out var c) && c.GetString() is { Length: > 0 } s)
+                            return s;
+        return "";
     }
 
     private static string Runs(JsonElement v, string prop)

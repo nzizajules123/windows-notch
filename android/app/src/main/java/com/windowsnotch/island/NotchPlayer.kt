@@ -164,13 +164,31 @@ object NotchPlayer {
     fun search(q: String, max: Int = 12): List<YtVideo> {
         val enc = URLEncoder.encode(q, "UTF-8")
         // "videos only" filter first; if YouTube serves a page we can't read, try the plain results page
-        for (url in listOf("https://www.youtube.com/results?search_query=$enc&sp=EgIQAQ%253D%253D", "https://www.youtube.com/results?search_query=$enc"))
-            repeat(2) {
-                val r = fetchResults(url, max)
-                if (r.isNotEmpty()) return r
-            }
-        return emptyList()
+        for (url in listOf("https://www.youtube.com/results?search_query=$enc&sp=EgIQAQ%253D%253D", "https://www.youtube.com/results?search_query=$enc")) {
+            val r = fetchResults(url, max)
+            if (r.isNotEmpty()) return r
+        }
+        // the page layout couldn't be read: ask YouTube's own search service (what youtube.com itself calls)
+        return searchApi(q, max)
     }
+
+    private fun searchApi(q: String, max: Int): List<YtVideo> = runCatching {
+        val body = JSONObject()
+            .put("context", JSONObject().put("client", JSONObject().put("clientName", "WEB").put("clientVersion", "2.20241120.01.00").put("hl", "en").put("gl", "US")))
+            .put("query", q)
+            .put("params", "EgIQAQ%3D%3D")   // videos only
+            .toString()
+        val c = URL("https://www.youtube.com/youtubei/v1/search?prettyPrint=false").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true
+        c.setRequestProperty("Content-Type", "application/json")
+        c.setRequestProperty("Origin", "https://www.youtube.com")
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+        c.connectTimeout = 8000; c.readTimeout = 10000
+        val json = try { c.outputStream.use { it.write(body.toByteArray()) }; c.inputStream.bufferedReader().readText() } finally { c.disconnect() }
+        val out = ArrayList<YtVideo>()
+        walk(JSONObject(json), out, max)
+        out
+    }.getOrDefault(emptyList())
 
     private fun fetchResults(url: String, max: Int): List<YtVideo> = runCatching {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -183,6 +201,7 @@ object NotchPlayer {
         if (start < 0) return emptyList()
         start = html.indexOf('{', start)
         val end = html.indexOf(";</script>", start)
+        if (end < 0) return emptyList()
         val out = ArrayList<YtVideo>()
         walk(JSONObject(html.substring(start, end)), out, max)
         out
@@ -198,6 +217,18 @@ object NotchPlayer {
                     val len = lengthOf(v)
                     if (len.isNotEmpty() && out.none { it.id == id })
                         out.add(YtVideo(id, runs(v, "title"), runs(v, "ownerText").ifEmpty { runs(v, "longBylineText") }, len))
+                    return
+                }
+                // YouTube's newer layout: lockupViewModel (contentId + lockupMetadataViewModel + a time badge)
+                val lv = e.optJSONObject("lockupViewModel")
+                if (lv != null && lv.has("contentId")) {
+                    val id = lv.optString("contentId")
+                    val isVideo = lv.optString("contentType", "LOCKUP_CONTENT_TYPE_VIDEO") == "LOCKUP_CONTENT_TYPE_VIDEO"
+                    val meta = lv.optJSONObject("metadata")?.optJSONObject("lockupMetadataViewModel")
+                    val title = meta?.optJSONObject("title")?.optString("content").orEmpty()
+                    val len = badgeTime(lv)
+                    if (isVideo && id.length == 11 && title.isNotEmpty() && len.isNotEmpty() && out.none { it.id == id })
+                        out.add(YtVideo(id, title, meta?.let { firstMetadataText(it) }.orEmpty(), len))
                     return
                 }
                 val keys = e.keys()
@@ -216,6 +247,29 @@ object NotchPlayer {
             if (ts.optString("style") == "LIVE") return ""
             val txt = runs(ts, "text")
             if (txt.isNotEmpty() && txt[0].isDigit()) return txt
+        }
+        return ""
+    }
+
+    /** The "3:40" time badge somewhere on a lockup's thumbnail ("" for live streams). */
+    private fun badgeTime(e: Any?): String {
+        when (e) {
+            is JSONObject -> {
+                e.optJSONObject("thumbnailBadgeViewModel")?.optString("text")?.let { if (it.isNotEmpty() && it[0].isDigit() && ':' in it) return it }
+                val keys = e.keys()
+                while (keys.hasNext()) badgeTime(e.opt(keys.next())).let { if (it.isNotEmpty()) return it }
+            }
+            is JSONArray -> for (i in 0 until e.length()) badgeTime(e.opt(i)).let { if (it.isNotEmpty()) return it }
+        }
+        return ""
+    }
+
+    /** The channel name: the first text in a lockup's metadata rows. */
+    private fun firstMetadataText(meta: JSONObject): String {
+        val rows = meta.optJSONObject("metadata")?.optJSONObject("contentMetadataViewModel")?.optJSONArray("metadataRows") ?: return ""
+        for (i in 0 until rows.length()) {
+            val parts = rows.optJSONObject(i)?.optJSONArray("metadataParts") ?: continue
+            for (j in 0 until parts.length()) parts.optJSONObject(j)?.optJSONObject("text")?.optString("content")?.let { if (it.isNotEmpty()) return it }
         }
         return ""
     }
