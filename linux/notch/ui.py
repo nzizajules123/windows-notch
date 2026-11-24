@@ -333,6 +333,10 @@ class Island(Gtk.Window):
         GLib.timeout_add_seconds(90, self._check_update)
         if self.s["claps"]:
             self._start_claps()
+        if "--demo" in sys.argv:
+            # QA: open a view by itself (nobody can hover a virtual screen): --demo media|todo|control|break|privacy
+            what = sys.argv[sys.argv.index("--demo") + 1] if sys.argv.index("--demo") + 1 < len(sys.argv) else "media"
+            GLib.timeout_add_seconds(2, lambda: (self._demo(what), False)[1])
         if "--updated" in sys.argv:
             GLib.timeout_add_seconds(5, lambda: (self.say(f"Updated to v{VERSION} ✨", 5), False)[1])
         else:
@@ -532,7 +536,9 @@ class Island(Gtk.Window):
     def _media_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         top = Gtk.Box(spacing=14)
-        self.art_img = Gtk.Image()
+        self.blank_art = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 96, 96)
+        self.blank_art.fill(0x00000000)          # transparent: no "missing image" icon when nothing plays
+        self.art_img = Gtk.Image.new_from_pixbuf(self.blank_art)
         self.art_img.set_size_request(96, 96)
         top.pack_start(self.art_img, False, False, 0)
         info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, valign=Gtk.Align.CENTER)
@@ -770,7 +776,8 @@ class Island(Gtk.Window):
             self.m_title.set_text("Nothing playing")
             self.m_artist.set_text("Play something in Spotify, Firefox, VLC… or search a song below")
             self.m_lyric.set_text("")
-            self.art_img.clear()
+            self.art_img.set_from_pixbuf(self.blank_art)
+            self.art_key = None
         if self.pages.get_visible_child_name() == "todo":
             if not getattr(self, "_todos_drawn", False):
                 self._refresh_todos()
@@ -792,7 +799,7 @@ class Island(Gtk.Window):
                     pb = loader.get_pixbuf().scale_simple(96, 96, GdkPixbuf.InterpType.BILINEAR)
             except Exception:
                 pb = None
-            GLib.idle_add(lambda: (self.art_img.set_from_pixbuf(pb) if pb else self.art_img.clear(), False)[1])
+            GLib.idle_add(lambda: (self.art_img.set_from_pixbuf(pb or self.blank_art), False)[1])
         threading.Thread(target=work, daemon=True).start()
 
     # ------------------------------------------------------------------ timers
@@ -1201,6 +1208,22 @@ class Island(Gtk.Window):
         else:
             self.toggle_talk()
 
+    def _demo(self, what):
+        log(f"demo: {what}")
+        if what in ("media", "todo", "control"):
+            if what == "todo" and not self.todos.items:
+                self.todos.add("Call mom", todomod.parse("call mom at 5pm")[1])
+                self.todos.add("Push the release", None)
+            self.expand()
+            self.tabs[what].set_active(True)
+            self.collapse_at = time.monotonic() + 3600
+        elif what == "break":
+            self.start_break("asked", 5)
+        elif what == "privacy":
+            self.privacy(True)
+        elif what == "talk":
+            self.say("Hello! I can talk now 😊", 10)
+
     # ------------------------------------------------------------------ setup & updates
     def setup_dialog(self):
         d = Gtk.Dialog(title="Talk with the notch", transient_for=self, modal=True)
@@ -1270,8 +1293,9 @@ def _s(d):
     return {"type": "STRING", "description": d}
 
 
-def _fn(name, desc, required=(), **params):
-    f = {"name": name, "description": desc}
+def _fn(fn_name, desc, required=(), /, **params):
+    # positional-only, so a parameter called "name" (open_app's) can't collide with these
+    f = {"name": fn_name, "description": desc}
     if params:
         f["parameters"] = {"type": "OBJECT", "properties": params}
         if required:
