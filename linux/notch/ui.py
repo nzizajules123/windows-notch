@@ -41,7 +41,13 @@ button.tab:checked { background-color: rgba(255,255,255,0.13); border-color: rgb
 button.chip:hover, button.tile:hover, button.icon:hover, button.tab:hover { background-color: rgba(255,255,255,0.17); }
 button.tile { border-radius: 16px; padding: 10px 4px; font-weight: 600; }
 button.danger { background-color: rgba(255,69,58,0.85); }
-button.primary { background-color: #ffffff; color: #111111; font-weight: 700; }
+button.primary { background-image: none; box-shadow: none; text-shadow: none; border: none; border-radius: 12px;
+  background-color: #ffffff; color: #111111; font-weight: 700; font-size: 15px; padding: 4px 14px; }
+button.primary:hover { background-color: #e6e6ea; }
+switch { background-image: none; background-color: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.1); }
+switch:checked { background-color: #30d158; border-color: #30d158; }
+switch slider { background-image: none; background-color: #ffffff; border: none; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+button.primary label { color: #111111; }
 entry { background-color: rgba(255,255,255,0.08); color: #ffffff; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); caret-color: #ffffff; padding: 6px 10px; }
 list, row { background-color: transparent; }
 row { border-radius: 12px; padding: 2px; }
@@ -218,6 +224,11 @@ class Curtain(Gtk.Window):
         GLib.timeout_add(1000, self._tick)
 
     def show_it(self):
+        # cover the monitor ourselves too: fullscreen() alone needs a cooperating window manager
+        display = Gdk.Display.get_default()
+        geo = (display.get_primary_monitor() or display.get_monitor(0)).get_geometry()
+        self.set_default_size(geo.width, geo.height)
+        self.move(geo.x, geo.y)
         self.fullscreen()
         self.show_all()
         self.present()
@@ -379,6 +390,8 @@ class Island(Gtk.Window):
         display = Gdk.Display.get_default()
         mon = display.get_primary_monitor() or display.get_monitor(0)
         geo = mon.get_geometry()
+        if not self.expanded:
+            self.pill.set_size_request(w, h)   # a DrawingArea asks for nothing by itself
         self.resize(w, h)
         self.move(geo.x + (geo.width - w) // 2, geo.y + 6)
 
@@ -417,6 +430,9 @@ class Island(Gtk.Window):
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.stack.set_transition_duration(180)
+        # size to the page that's showing, or the window can never shrink back to the pill
+        self.stack.set_hhomogeneous(False)
+        self.stack.set_vhomogeneous(False)
         self.pill = Gtk.DrawingArea()
         self.pill.connect("draw", self._draw_pill)
         self.pill.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
@@ -488,7 +504,7 @@ class Island(Gtk.Window):
         self.panel.get_style_context().add_class("panel")
         head = Gtk.Box(spacing=4)
         self.tabs = {}
-        for key, label in (("media", "♫  Media"), ("todo", "✓  To-do"), ("control", "⏻  Control")):
+        for key, label in (("media", "♫  Media"), ("todo", "✓  To-do"), ("control", "⚙  Control")):
             b = Gtk.ToggleButton(label=label)
             b.get_style_context().add_class("tab")
             b.connect("toggled", self._tab, key)
@@ -615,7 +631,7 @@ class Island(Gtk.Window):
         self.todo_entry = Gtk.Entry(placeholder_text="Add a to-do… (\"call mom at 5pm\", \"stretch in 20 min\")")
         self.todo_entry.connect("activate", lambda e: self._add_todo())
         row.pack_start(self.todo_entry, True, True, 0)
-        row.pack_start(self._chip("＋", self._add_todo, cls="primary"), False, False, 0)
+        row.pack_start(self._chip("+", self._add_todo, cls="primary"), False, False, 0)
         box.pack_start(row, False, False, 0)
         sc = Gtk.ScrolledWindow(); sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.todo_list = Gtk.ListBox()
@@ -660,7 +676,7 @@ class Island(Gtk.Window):
         tiles = Gtk.Box(spacing=8, homogeneous=True)
         for label, fn in (("🔒\nLock", system.lock_screen), ("🌙\nSleep", system.suspend),
                           ("↻\nRestart", lambda: self.start_countdown("Restarting", system.reboot)),
-                          ("⏻\nShut down", lambda: self.start_countdown("Shutting down", system.poweroff))):
+                          ("🔌\nShut down", lambda: self.start_countdown("Shutting down", system.poweroff))):
             tiles.pack_start(self._chip(label, fn, cls="tile"), True, True, 0)
         box.pack_start(tiles, False, False, 0)
         grid = Gtk.Grid(column_spacing=14, row_spacing=6)
