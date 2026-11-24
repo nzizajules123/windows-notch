@@ -13,8 +13,8 @@ public sealed class WakeWord : IDisposable
     private string _name = "Notch";
     private DateTime _cooldown;
 
-    /// <summary>The wake phrase was heard (on a background thread).</summary>
-    public event Action<string>? Heard;
+    /// <summary>The wake phrase was heard (on a background thread): the phrase, and when (UTC) it began to be spoken.</summary>
+    public event Action<string, DateTime>? Heard;
     /// <summary>Stricter while music plays, so a song can't wake it.</summary>
     public Func<bool>? Strict { get; set; }
     public string Status { get; private set; } = "off";
@@ -37,7 +37,9 @@ public sealed class WakeWord : IDisposable
                 if (e.Result.Confidence < need || DateTime.UtcNow < _cooldown) return;
                 _cooldown = DateTime.UtcNow.AddSeconds(4);
                 App.Log($"wake word: \"{e.Result.Text}\" ({e.Result.Confidence:0.00})");
-                Heard?.Invoke(e.Result.Text);
+                DateTime spoken;
+                try { spoken = e.Result.Audio?.StartTime.ToUniversalTime() ?? DateTime.UtcNow; } catch { spoken = DateTime.UtcNow; }
+                Heard?.Invoke(e.Result.Text, spoken);
             };
             LoadGrammar(name);
             _engine.RecognizeAsync(RecognizeMode.Multiple);

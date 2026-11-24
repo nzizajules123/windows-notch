@@ -274,7 +274,7 @@ public partial class NotchWindow : Window
         // QA hook: --talk  (starts a live conversation a few seconds after launch)
         var talkAt = Array.IndexOf(args, "--talk");
         if (talkAt >= 0 && talkAt + 1 < args.Length && !args[talkAt + 1].StartsWith("--")) _talk.FirstMessage = args[talkAt + 1];
-        if (args.Contains("--talk")) { var tt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) }; tt.Tick += (_, _) => { tt.Stop(); ToggleLiveTalk(); }; tt.Start(); }
+        if (args.Contains("--talk")) { var tt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) }; tt.Tick += (_, _) => { tt.Stop(); ToggleLiveTalk("--talk"); }; tt.Start(); }
         var demo = Array.IndexOf(args, "--demo");
         if (demo >= 0 && demo + 1 < args.Length)
         {
@@ -975,6 +975,9 @@ public partial class NotchWindow : Window
     private readonly TalkMemory _memory = new();
     private readonly UserProfile _profile = UserProfile.Load();
     private WakeWord? _wake;
+    /// <summary>When the last live chat ended: nothing automatic may switch it straight back on.</summary>
+    private DateTime _talkEndedAt = DateTime.MinValue;
+    private bool TalkEndedWithin(TimeSpan t) => DateTime.UtcNow - _talkEndedAt < t;
 
     /// <summary>Starts (or stops) listening for "Hey &lt;name&gt;" — only when there's a Gemini key to talk with.</summary>
     private void SyncWakeWord()
@@ -984,12 +987,15 @@ public partial class NotchWindow : Window
         if (!want) { _wake?.Stop(); _wake = null; return; }
         if (_wake != null) return;
         _wake = new WakeWord { Strict = () => _media.Current?.IsPlaying == true };
-        _wake.Heard += _ => Dispatcher.BeginInvoke(() =>
+        _wake.Heard += (_, spokenAt) => Dispatcher.BeginInvoke(() =>
         {
             if (_talk.Active || Native.IsSessionLocked()) return;
+            // the recognizer also hears the conversation (and its goodbye) and reports a moment late:
+            // a phrase that began before the chat had ended was part of that chat, not a new call
+            if (spokenAt < _talkEndedAt.AddSeconds(2)) { App.Log("wake word: ignored (said while the last chat was ending)"); return; }
             Eyes.Jump(1.2);
             Eyes.Express(EyeMood.Happy, 1200);
-            ToggleLiveTalk();
+            ToggleLiveTalk("wake word");
         });
         if (!_wake.Start(_profile.AssistantName)) App.Log("wake word: " + _wake.Status);
     }
@@ -1143,7 +1149,7 @@ public partial class NotchWindow : Window
         src?.AddHook((IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled) =>
         {
             if (msg == 0x0312 && w.ToInt32() == HotkeyPrivacy) { handled = true; ShowStandby(manual: true); }   // WM_HOTKEY
-            if (msg == 0x0312 && w.ToInt32() == HotkeyTalk) { handled = true; ToggleLiveTalk(); }
+            if (msg == 0x0312 && w.ToInt32() == HotkeyTalk) { handled = true; ToggleLiveTalk("Ctrl+Alt+T"); }
             return IntPtr.Zero;
         });
         // MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'P'
@@ -1685,6 +1691,7 @@ public partial class NotchWindow : Window
         if (!_settings.TalkOnReminder || !_talk.HasKey || Native.IsSessionLocked() || App.SnapshotDir != null) return false;
         var note = $"(Reminder from the user's to-do list: \"{t.Text}\" is due now, at {t.Due:HH:mm}. Tell them about it in a friendly way and give two or three short, practical ideas or first steps for doing it. Then ask if they'd like help with it.)";
         if (_talk.Active) { _ = _talk.SayToModelAsync(note); return true; }
+        if (TalkEndedWithin(TimeSpan.FromMinutes(2))) return false;   // you just switched it off: the card (and a short "Reminder!") is enough
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };   // after the reminder card has popped
         timer.Tick += async (_, _) =>
         {
@@ -2657,6 +2664,7 @@ public partial class NotchWindow : Window
     private void MaybeStartProactiveChat()
     {
         if (!_settings.ProactiveChats || !_talk.HasKey || _talk.Active || _breakUntil != null || _standby != null) return;
+        if (TalkEndedWithin(TimeSpan.FromMinutes(45))) return;   // you just finished talking: don't start another chat on its own
         var now = DateTime.Now;
         if (now.Hour < 9 || now.Hour >= 21 || now - _startedAt < TimeSpan.FromMinutes(10)) return;   // not at night, not right after start
         if (_profile.ProactiveDay.Date != now.Date) { _profile.ProactiveDay = now.Date; _profile.ProactiveToday = 0; }
@@ -3624,6 +3632,7 @@ public partial class NotchWindow : Window
         if (Native.IsSessionLocked()) return "locked";
         // the notch's own voice comes out of the speakers: syllables can sound like claps
         if (_talk.Active) return "live talk on";
+        if (TalkEndedWithin(TimeSpan.FromSeconds(8))) return "live talk just ended";
         if (_voice.Speaking || DateTime.UtcNow < _voiceQuietUntil) return "notch speaking";
         if (_media.Current?.IsPlaying == true) return "media playing";
         // nobody claps with a hand on the mouse: any input during the claps means it was typing or clicking
@@ -3660,7 +3669,7 @@ public partial class NotchWindow : Window
         }
         else if (n == 4)
         {
-            if (_talk.HasKey) ToggleLiveTalk();
+            if (_talk.HasKey) ToggleLiveTalk("4 claps");
             else SetVoice(!_settings.VoiceEnabled, announce: true);
         }
         else if (_countdown == 0)
@@ -4125,6 +4134,7 @@ public partial class NotchWindow : Window
                 Eyes.Attend(0, 1.5, 1200);   // looking at you, listening
                 break;
             case LiveTalkService.TalkState.Off:
+                _talkEndedAt = DateTime.UtcNow;
                 _talkBob.Stop();
                 _liveLine = null;
                 if (msg != null) SayLater("⚠ " + msg, 400, 4000);
@@ -4157,9 +4167,12 @@ public partial class NotchWindow : Window
             : "Talk with the notch — add a Gemini API key first";
     }
 
-    private async void ToggleLiveTalk()
+    private async void ToggleLiveTalk(string source = "button")
     {
-        if (_talk.Active) { _talk.Stop("you ended it"); return; }
+        if (_talk.Active) { _talkEndedAt = DateTime.UtcNow; _talk.Stop($"you ended it · {source}"); return; }
+        // a double click / double press (or a late echo) right after stopping must not switch it straight back on
+        if (TalkEndedWithin(TimeSpan.FromSeconds(2))) { App.Log($"live talk: start ignored, it just ended ({source})"); return; }
+        App.Log($"live talk: start ({source})");
         if (!_talk.HasKey)
         {
             if (!OpenVoiceSetup() || !_talk.HasKey) return;
@@ -4170,7 +4183,7 @@ public partial class NotchWindow : Window
         await _talk.StartAsync(LivePrompt());
     }
 
-    private void TalkLive_Click(object sender, RoutedEventArgs e) => ToggleLiveTalk();
+    private void TalkLive_Click(object sender, RoutedEventArgs e) => ToggleLiveTalk("talk button");
 
     /// <summary>Who the notch is when it talks: a short, warm, playful companion at the top of the screen.</summary>
     private string LivePrompt()
