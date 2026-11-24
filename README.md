@@ -354,6 +354,41 @@ music plays the eyes step aside for the artwork and equaliser, and the current l
 
 Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` then `gradlew assembleRelease`.
 
+## Linux: Notch for Linux
+
+The notch for Linux desktops (Ubuntu, Debian, Fedora, Arch, openSUSE…), in [`linux/`](linux): Python + GTK 3.
+- **The pill:** a small island at the top of the screen with the time, the living eyes and the battery. While music
+  plays it shows equalizer bars and the current lyric line (LRCLIB).
+- **Hover to open:**
+  - **Media:** what's playing in Spotify, Firefox, Chrome, VLC or any MPRIS player, with controls, synced lyrics, and a
+    YouTube search that plays in the background with mpv (or in the browser).
+  - **To-do:** tasks in plain words, with reminders.
+  - **Control:** lock, sleep, restart and shut down (with a countdown), and switches.
+- **Talk with the notch** (Gemini Live): the 🎙 button, or four claps. It's the same as on Windows:
+  - it opens and closes apps, plays and controls music, searches, adds to-dos, and writes documents (.docx or text)
+    to the folder you name;
+  - it shows the privacy screen and locks the PC;
+  - it knows your name and hobbies, remembers your chats and notes, and starts chats now and then;
+  - due to-dos start a conversation.
+- **Healthy breaks**, plus breaks you ask for, now or at a set time. The break screen can't be closed early (emergency
+  only: hold Ctrl+Shift+E for 5 s).
+- **Claps 👏:** two claps lock, four start a chat. Ignored while you type, while music plays, or while the notch talks.
+- **Automatic updates** from the `linux-v…` GitHub releases, checked against their SHA-256.
+
+**Install:** download `NotchLinux-v*.tar.gz` from [Releases](../../releases), unpack it, and run:
+
+```bash
+bash notch-linux/install.sh
+```
+
+It installs the few packages it needs (Python GObject, GTK 3, python3-websockets, pulseaudio-utils, wmctrl; mpv and
+yt-dlp if available), adds Notch to your apps menu, starts it at login and starts it now. `uninstall.sh` removes it.
+Your settings, to-dos and memory stay in `~/.config/notch` and `~/.local/share/notch`, readable only by you.
+
+**Desktops:** the island runs as an X11 window, so it can sit at the top of the screen and stay above other windows.
+On Wayland desktops (GNOME and KDE on Ubuntu, Fedora…) it runs through XWayland automatically. There are no hand
+gestures and no "Hey <name>" wake phrase on Linux yet.
+
 ## iPhone: Notch Island for iOS
 
 The island for iPhone (iOS 16.2+), in [`ios/`](ios). It lives in your **Dynamic Island**: when you leave the app, the
