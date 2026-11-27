@@ -3748,7 +3748,7 @@ public partial class NotchWindow : Window
     {
         _talk.ApiKey = VoiceService.Unprotect(_settings.GeminiKey);
         _talk.VoiceName = string.IsNullOrWhiteSpace(_settings.GeminiVoice) ? "Kore" : _settings.GeminiVoice;
-        _talk.Tools = LiveTools();
+        _talk.Tools = LiveTools().Concat(PcTools()).ToArray();
         _talk.MusicPlaying = () => _media.Current?.IsPlaying == true;
         _talk.Exchange += (you, notch) => _memory.Add(you, notch);
         _talk.ToolHandler = (name, args) => Dispatcher.InvokeAsync(() => RunVoiceActionAsync(name, args)).Task.Unwrap();
@@ -3761,7 +3761,7 @@ public partial class NotchWindow : Window
     // ------------------------------------------------------------------ actions Gemini can take while you talk
     private static object Str(string description) => new { type = "STRING", description };
 
-    /// <summary>What the notch can do when you ask out loud. Restart / shut down are deliberately not here.</summary>
+    /// <summary>What the notch can do when you ask out loud (the PC-control actions are in NotchWindow.Pc.cs).</summary>
     private static object[] LiveTools() => new object[]
     {
         new { name = "open_app", description = "Open or switch to an app on the user's Windows PC by its name (e.g. VS Code, Chrome, Spotify, WhatsApp, Word, File Explorer, Settings, Calculator, Start menu). If it's already open it comes to the front.",
@@ -4113,7 +4113,7 @@ public partial class NotchWindow : Window
                 PowerService.Lock();
                 return ("Locked.", true);
             default:
-                return ("Unknown action.", false);
+                return await RunPcActionAsync(name, args) ?? ("Unknown action.", false);
         }
     }
 
@@ -4206,7 +4206,14 @@ public partial class NotchWindow : Window
                "You look after the user's health with computer breaks: you can tell them when the next break is, start one, or change the schedule. " +
                "During a break you keep them company; you can never end a break early, so if they ask, kindly say no and encourage them. " +
                "You can also list and close open apps, and turn the privacy screen on or off (that only hides the screen; lock_pc really locks the PC). " +
-               "If a tool says something wasn't found, tell the user kindly. You can't restart or shut down the PC. " +
+               "You control the whole PC for them: volume and brightness, Wi-Fi, Bluetooth and dark mode, any Settings page, arranging windows (minimize, maximize, snap, show desktop), " +
+               "typing text and pressing shortcuts in the app in front, the clipboard, screenshots, PC health (why it's slow, disk space), force-closing frozen apps, installing apps, " +
+               "and restarting / shutting down / sleeping / signing out (those show a countdown they can cancel). " +
+               "When they ask to open or find a file ('open my CV', 'the PDF I downloaded yesterday'), search with find_files and open the best match; if several fit, say the top two or three and ask. " +
+               "When they ask about something on their screen ('what's this error?', 'help me with this', 'read this'), use look_at_screen and answer from what you see. " +
+               "For bigger jobs, chain several tools yourself (e.g. open Notepad, then type the text, then press ctrl+s). " +
+               "Ask first before anything that can't be undone (emptying the Recycle Bin, force-closing an app with unsaved work, installing an app); everything else, just do it. " +
+               "If a tool says something wasn't found, tell the user kindly and suggest what to try. " +
                "Music may be playing quietly in the background while you talk: ignore song lyrics and only answer when the user speaks to you. " +
                $"It is {now:dddd d MMMM yyyy, HH:mm}.{media}{battery}" +
                "\n\nYou remember things long-term to help the user stay on track: when they mention a goal, plan, project, deadline, decision or something you agreed to do, save it with remember_note; remove notes that are done with forget_note. " +

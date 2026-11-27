@@ -155,5 +155,16 @@ public sealed class AppsService
     }
 
     public static void Minimize(IntPtr h) => Native.ShowWindow(h, Native.SW_MINIMIZE);
+
+    /// <summary>A window's title (shortened), for the AI to say which window it acted on.</summary>
+    public static string ShortTitle(IntPtr h)
+    {
+        var len = Native.GetWindowTextLength(h);
+        if (len <= 0) return "the window";
+        var sb = new System.Text.StringBuilder(len + 1);
+        Native.GetWindowText(h, sb, sb.Capacity);
+        var t = sb.ToString();
+        return t.Length > 60 ? t[..58] + "…" : t;
+    }
     public static void Close(IntPtr h) => Native.PostMessage(h, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
 }

@@ -51,22 +51,38 @@ object NotchPlayer {
 
     val current: YtVideo? get() = queue.getOrNull(index)
 
-    /** Creates the hidden player view (added to the island window by the service). */
+    /** The island's window: the hidden player is added to it when a song first plays. */
+    var host: android.widget.FrameLayout? = null
+
+    /** Creates the hidden player view on first use (it costs 50–100 MB, so not before a song is played). */
     @SuppressLint("SetJavaScriptEnabled")
-    fun createView(ctx: Context): View {
-        val w = WebView(ctx)
+    private fun ensureWeb() {
+        if (web != null) return
+        val h = host ?: return
+        val w = WebView(h.context)
         w.settings.javaScriptEnabled = true
         w.settings.domStorageEnabled = true
         w.settings.mediaPlaybackRequiresUserGesture = false
         w.webChromeClient = WebChromeClient()
         w.addJavascriptInterface(Bridge(), "NotchBridge")
+        w.alpha = 0.01f
+        ready = false
         w.loadDataWithBaseURL("https://notch.local/", HTML, "text/html", "utf-8", null)
+        h.addView(w, android.widget.FrameLayout.LayoutParams(2, 2))
         web = w
-        return w
+    }
+
+    /** Frees the player's memory (low-RAM phones after a stop, and when the island turns off). */
+    fun release() {
+        val w = web ?: return
+        web = null
+        ready = false
+        runCatching { (w.parent as? android.view.ViewGroup)?.removeView(w); w.destroy() }
     }
 
     fun play(list: List<YtVideo>, i: Int) {
         queue = list
+        ensureWeb()
         playIndex(i)
     }
 
@@ -98,9 +114,12 @@ object NotchPlayer {
         js("cmd('stop')")
         index = -1; state = -1
         Island.playerMedia = null
+        // on a small phone, give the memory back once the music has stopped for a little while
+        if (Device.lite) main.postDelayed({ if (index < 0) release() }, 60_000)
     }
 
-    private fun js(code: String) = main.post { web?.evaluateJavascript(code, null) }
+    // before the player has loaded, load('…') is sent when it says "ready" (see onMessage)
+    private fun js(code: String) = main.post { if (ready || !code.startsWith("load(")) web?.evaluateJavascript(code, null) }
 
     private fun publish() {
         val v = current ?: run { Island.playerMedia = null; return }

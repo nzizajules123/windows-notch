@@ -65,6 +65,7 @@ class IslandService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        Device.init(this)
         Island.lyricsEnabled = getSharedPreferences("island", MODE_PRIVATE).getBoolean("lyrics", true)
         Island.talk = getSharedPreferences("island", MODE_PRIVATE).getBoolean("talk", true)
         android.os.Handler(mainLooper).postDelayed({ Island.say(Island.greeting()) }, 3600)   // after the droplet intro
@@ -119,12 +120,27 @@ class IslandService : AccessibilityService() {
         android.os.Handler(mainLooper).postDelayed({ TalkActivity.toggle(this, note) }, 2500)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    /**
+     * Android Go phones (Tecno Pop, Itel, Samsung A0x Go…) can't grant Notification access, so the island learns about
+     * notifications here instead: chats and alerts, and the media session that music apps put in their notification.
+     * When Notification access *is* on, the listener does this and these events are ignored.
+     */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED || Island.listenerConnected) return
+        val n = event.parcelableData as? android.app.Notification ?: return
+        val pkg = event.packageName?.toString() ?: return
+        val token = Notifs.mediaToken(n)
+        if (token != null) { MediaHub.useToken(this, token); return }
+        val ongoing = n.flags and android.app.Notification.FLAG_ONGOING_EVENT != 0
+        runCatching { Notifs.handle(this, pkg, n, ongoing) }
+    }
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         Island.overlayRunning = false
         instance = null
+        NotchPlayer.release()
+        NotchPlayer.host = null
         runCatching { unregisterReceiver(receiver) }
         view?.let { runCatching { wm.removeView(it) } }
         view = null
@@ -173,8 +189,9 @@ class IslandService : AccessibilityService() {
             }
         }.apply {
             addView(compose)
-            // the island's own YouTube player: a tiny, invisible web view living in this window
-            addView(NotchPlayer.createView(this@IslandService).apply { alpha = 0.01f }, android.widget.FrameLayout.LayoutParams(2, 2))
+            // the island's own YouTube player: a tiny, invisible web view living in this window, created only when
+            // a song is played (a web view costs 50–100 MB of memory, a lot on a 2 GB phone)
+            NotchPlayer.host = this
             setViewTreeLifecycleOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
             setOnTouchListener { _, ev ->

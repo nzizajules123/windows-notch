@@ -129,9 +129,12 @@ fun Eyes(
     val irisColor = if (mood == EyeMood.Angry) lerp(iris, Color(0xFFFF3B30), 0.6f) else iris
 
     // bob to the music
+    // (the animation only runs while music plays: an endless animation redraws 60 times a second, which costs battery)
     val playing = Island.media?.playing == true
-    val bobT = rememberInfiniteTransition(label = "bob")
-    val bob by bobT.animateFloat(-1f, 1f, infiniteRepeatable(tween(430, easing = LinearEasing), RepeatMode.Reverse), label = "bobY")
+    val bob = if (playing && !com.windowsnotch.island.Device.lite) {
+        val bobT = rememberInfiniteTransition(label = "bob")
+        bobT.animateFloat(-1f, 1f, infiniteRepeatable(tween(430, easing = LinearEasing), RepeatMode.Reverse), label = "bobY").value
+    } else 0f
 
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var mod = modifier.size(eyeSize * 2 + gap + 4.dp, eyeSize + eyeSize * 0.6f + 6.dp)

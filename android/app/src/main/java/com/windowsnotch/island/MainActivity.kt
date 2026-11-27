@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Device.init(this)
         Todo.init(this)
         Voice.init(this)
         Updates.check(this)
@@ -159,7 +160,19 @@ private fun Setup(
             "Can't switch it on? Android blocks this for apps installed from a file. Open App info → ⋮ → \"Allow restricted settings\", then try again.",
             color = Faint, fontSize = 12.sp, modifier = Modifier.clickable(onClick = openAppInfo).padding(horizontal = 4.dp),
         )
-        Step(2, "Allow media & notifications", "Lets the island show what's playing (artwork, controls, lyrics) and pop up your notifications.", listenerOn, "Open Notification access", openListener)
+        if (Device.goEdition) {
+            // Android Go (Tecno Pop, Itel A-series…): there is no Notification access to give; the island's
+            // accessibility service shows music and notifications instead
+            Step(2, "Media & notifications", "Your phone runs Android Go, which doesn't offer Notification access — that's fine: " +
+                "once step 1 is on, the island shows what's playing (artwork, controls, lyrics) and your notifications through it.",
+                overlayOn, "Open Accessibility", openAccessibility)
+        } else {
+            Step(2, "Allow media & notifications", "Lets the island show what's playing (artwork, controls, lyrics) and pop up your notifications.", listenerOn, "Open Notification access", openListener)
+        }
+        if (Device.lite) Text(
+            "Lite mode is on for this phone (${"%.1f".format(Device.ramGb)} GB of memory): lighter animations, smaller pictures, and the music player only loads when you play a song.",
+            color = Faint, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 4.dp),
+        )
 
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

@@ -508,7 +508,10 @@ class TalkService : Service() {
             "You are their friendly companion: warm, playful, encouraging and a little funny. Speak naturally like a friend in a voice chat; " +
             "keep answers short (one to three sentences) unless asked for more. Reply in the language the user speaks. " +
             "You can act on the phone with your tools: open apps, search and play music, pause / skip music, search the web, open websites, " +
-            "add to-dos with reminders, go to the home screen and lock the phone. When the user asks, call the tool straight away, then say in a few words what you did. " +
+            "add to-dos with reminders, go to the home screen and lock the phone. You also control the phone itself: the volume, the flashlight, any settings panel " +
+            "(Wi-Fi, Bluetooth, mobile data, display, battery…), going back, recent apps, notifications, quick settings, screenshots, the power menu, " +
+            "alarms and timers in the clock app, opening the dialer with a number, and checking the phone's health (battery, memory, storage). " +
+            "When the user asks, call the tool straight away, then say in a few words what you did. " +
             "Android doesn't let you close other apps; offer to go to the home screen instead. You can't restart or turn off the phone. " +
             "Music may be playing quietly in the background: ignore song lyrics and only answer when the user speaks to you. " +
             "It is $now. The battery is at ${Island.battery}%${if (Island.charging) " and charging" else ""}.$media" +
@@ -578,6 +581,7 @@ class TalkService : Service() {
             "every_minutes" to JSONObject().put("type", "INTEGER").put("description", "Minutes of phone use between breaks (30-240)"),
             "break_minutes" to JSONObject().put("type", "INTEGER").put("description", "Length of each break (1-30)")))
         .put(fn("forget_memory", "Forget the earlier conversations the notch remembers. Only when the user asks."))
+        .also { arr -> PhoneControl.tools().forEach { arr.put(it) } }
 
     private fun runTools(calls: JSONArray) {
         main.post {
@@ -714,7 +718,7 @@ class TalkService : Service() {
                     length = if (a.has("break_minutes")) a.optInt("break_minutes") else null)
                 if (Breaks.enabled(this)) "Breaks are on: ${Breaks.lengthMin(this)} minutes after every ${Breaks.everyMin(this)} minutes of use." else "Breaks are off."
             }
-            else -> "Unknown action."
+            else -> PhoneControl.act(this, name, a) ?: "Unknown action."
         }
     }
 }

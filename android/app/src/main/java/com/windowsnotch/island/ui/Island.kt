@@ -1091,13 +1091,17 @@ private fun MediaPanel(m: MediaInfo, accent: Color, tick: Long, touched: () -> U
 // =====================================================================================
 @Composable
 private fun Equalizer(color: Color, playing: Boolean, height: Float) {
-    val t = rememberInfiniteTransition(label = "eq")
-    val bars = listOf(380, 520, 300, 460).mapIndexed { i, d ->
-        t.animateFloat(0.25f, 1f, infiniteRepeatable(tween(d, easing = LinearEasing), RepeatMode.Reverse, StartOffset(i * 90)), label = "b$i")
-    }
+    // animates only while playing (an endless animation redraws every frame); slower on small phones
+    val slow = if (com.windowsnotch.island.Device.lite) 1.7f else 1f
+    val values: List<Float> = if (playing) {
+        val t = rememberInfiniteTransition(label = "eq")
+        listOf(380, 520, 300, 460).mapIndexed { i, d ->
+            t.animateFloat(0.25f, 1f, infiniteRepeatable(tween((d * slow).toInt(), easing = LinearEasing), RepeatMode.Reverse, StartOffset(i * 90)), label = "b$i").value
+        }
+    } else List(4) { 0.22f }
     Row(Modifier.height(height.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.5.dp)) {
-        bars.forEach { b ->
-            val v = if (playing) b.value else 0.22f
+        values.forEach { b ->
+            val v = b
             Box(Modifier.width(3.dp).height((height * v).dp).clip(RoundedCornerShape(1.5.dp)).background(color))
         }
     }

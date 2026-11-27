@@ -173,6 +173,22 @@ greets you, and you just talk.
 | "Lock my PC" | lock the PC |
 | "Write a letter to my landlord about the leaking tap and save it on my Desktop" | write it and save it as a Word file (or .txt, .md, code…) in the folder you name, then open it |
 | "Open that file", "open my Documents" | open a file or folder |
+| "Open my CV", "find the PDF I downloaded yesterday", "open what I was working on" | search your files by name or type (Desktop, Documents, Downloads, Pictures, OneDrive, other drives) or your recent files, and open the right one |
+| "What's this error?", "help me with this", "read this for me" | look at your screen and answer from what it sees |
+| "Turn the volume down", "mute", "brightness to 60" | change the sound volume or the screen brightness |
+| "Turn off Wi-Fi", "Bluetooth on", "dark mode" | flip Wi-Fi, Bluetooth, or dark / light mode |
+| "Open Bluetooth settings", "open Windows Update", "Task Manager" | open any Settings page or system tool |
+| "Snap Chrome to the left", "maximize this", "show the desktop" | arrange windows |
+| "Type 'see you at 5' in WhatsApp", "press ctrl+s" | type text or press shortcuts in the app in front (or the one named) |
+| "Read what I copied", "copy this address" | read or fill the clipboard |
+| "Take a screenshot" | save one in Pictures\Screenshots |
+| "Why is my PC slow?", "how much space is left?" | check CPU, memory, disks, battery, Wi-Fi and the apps using the most memory |
+| "Chrome is frozen, force close it" | force-close a stuck app (never Windows' own processes) |
+| "Install VLC" | install an app with winget, in a window you can see, after you confirm |
+| "Restart", "shut down", "sleep", "sign out", "cancel!" | do it behind the notch's countdown, which you (or "cancel") can stop |
+| "Empty the recycle bin" | tell you how much is in it, and empty it only after you say yes |
+
+It chains actions by itself for bigger jobs ("open Notepad and write a shopping list" → opens it, types the list, saves).
 
 **It writes for you.** Letters, emails, essays, CVs, notes, lists, code: say what you need and where to save it
 (Desktop, Documents, Downloads, a sub-folder like "Documents\Letters", or a full path like "D:\School"). Word files are
@@ -311,6 +327,12 @@ from your browser or file manager when asked). Then open **Notch Island** and:
    Allow restricted settings* and try again.
 2. **Allow media & notifications**: Notification access → Notch Island → On.
 
+**Small phones (Android Go, 2–3 GB)** such as the Tecno Pop 10C, Itel A-series or Samsung Galaxy A0x work too:
+- Android Go has no Notification access, so step 2 isn't needed there: once the island is on, it shows what's playing
+  and your notifications through its accessibility service.
+- **Lite mode** switches on by itself: the hidden YouTube player only loads when you play a song (and is freed a minute
+  after you stop), idle animations rest, and pictures are kept small.
+
 Tap the island to open it, tap outside to close it. Tap the big eyes in the open view to poke them, or double-tap them to wink.
 
 The small pill shows the time, the eyes and battery %, on smoked glass tinted with the colour of what's playing. While
@@ -331,6 +353,9 @@ music plays the eyes step aside for the artwork and equaliser, and the current l
   - **Things you can ask:** open apps ("open WhatsApp"), play music ("play some Afrobeats" plays in the island), pause,
     skip, "what's playing?", search the web, open a website, add a to-do with a reminder, go to the home screen, or lock
     the phone.
+  - **It controls the phone too:** "volume to 50", "flashlight on", "open Wi-Fi settings", "go back", "show my
+    notifications", "take a screenshot", "wake me up at 6:30", "set a timer for 10 minutes", "call 0788 123 456" (opens
+    the dialer), "why is my phone slow?" (battery, memory, storage).
   - **Music:** the chat stays open while music plays, so you can say "stop it". Other apps' music is turned down while
     the notch speaks.
   - **Memory:** it remembers earlier chats; "forget our conversations" clears them.

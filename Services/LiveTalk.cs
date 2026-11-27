@@ -285,6 +285,10 @@ public sealed class LiveTalkService
     }
 
     /// <summary>Tells Gemini something mid-conversation (e.g. a to-do just came due); it answers out loud.</summary>
+    /// <summary>Shows Gemini a picture (e.g. the screen) as part of the conversation.</summary>
+    public Task SendImageAsync(byte[] jpeg) =>
+        Active ? SendAsync(new { realtimeInput = new { video = new { data = Convert.ToBase64String(jpeg), mimeType = "image/jpeg" } } }) : Task.CompletedTask;
+
     public Task SayToModelAsync(string text) =>
         Active ? SendAsync(new { clientContent = new { turns = new[] { new { role = "user", parts = new[] { new { text } } } }, turnComplete = true } }) : Task.CompletedTask;
 
