@@ -5,6 +5,8 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -109,7 +111,75 @@ class Player:
 
     def __init__(self):
         self.proc = None
+        self.items = []
+        self._last = None
         self.sock = os.path.join(tempfile.gettempdir(), f"notch-mpv-{os.getuid()}.sock")
+
+    @property
+    def running(self) -> bool:
+        return bool(self.proc and self.proc.poll() is None)
+
+    def ask(self, *props):
+        """Reads mpv properties in one go: {name: value} (missing ones are left out)."""
+        if not self.running:
+            return {}
+        out = {}
+        try:
+            with socket.socket(socket.AF_UNIX) as s:
+                s.settimeout(0.6)
+                s.connect(self.sock)
+                for i, p in enumerate(props):
+                    s.sendall((json.dumps({"command": ["get_property", p], "request_id": i + 1}) + "\n").encode())
+                buf = b""
+                while len(out) < len(props):
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    *lines, buf = buf.split(b"\n")
+                    for line in lines:
+                        try:
+                            m = json.loads(line)
+                        except ValueError:
+                            continue
+                        rid = m.get("request_id")
+                        if rid and 0 < rid <= len(props):
+                            out[props[rid - 1]] = m.get("data") if m.get("error") == "success" else None
+        except OSError:
+            pass
+        return {k: v for k, v in out.items() if v is not None}
+
+    def status(self):
+        """What the notch's own player is playing: {id, title, channel, position, length, playing}, or None.
+        Read from a cache a background thread keeps fresh, so the UI never waits on mpv (it can be busy loading)."""
+        if not self.running or not self.items:
+            return None
+        st = self._last
+        if st is None:
+            return None
+        return {**st, "position": st["position"] + (time.monotonic() - st["at"] if st["playing"] else 0)}
+
+    def _poll(self, proc):
+        while self.proc is proc and proc.poll() is None:
+            st = self._read_status()
+            self._last = st
+            time.sleep(1)
+        self._last = None
+
+    def _read_status(self):
+        st = self.ask("playlist-pos", "time-pos", "duration", "pause")
+        i = st.get("playlist-pos", 0)
+        if not isinstance(i, int) or not 0 <= i < len(self.items):
+            return None
+        it = self.items[i]
+        return {"id": it["id"], "title": it["title"], "channel": it.get("channel", ""), "at": time.monotonic(),
+                "position": float(st.get("time-pos") or 0), "length": float(st.get("duration") or 0), "playing": not st.get("pause", False)}
+
+    def set_volume(self, percent):
+        self.command("set_property", "volume", int(percent))
+
+    def seek(self, seconds):
+        self.command("seek", float(seconds), "absolute")
 
     @staticmethod
     def available() -> bool:
@@ -118,7 +188,8 @@ class Player:
     def play(self, results, index=0) -> bool:
         """Plays results[index:] as a playlist. Without mpv the first one opens in the browser."""
         self.stop()
-        urls = [f"https://www.youtube.com/watch?v={r['id']}" for r in results[index:index + 15]]
+        self.items = list(results[index:index + 15])
+        urls = [f"https://www.youtube.com/watch?v={r['id']}" for r in self.items]
         if not urls:
             return False
         if not self.available():
@@ -128,6 +199,11 @@ class Player:
         self.proc = subprocess.Popen(["mpv", "--no-video", "--really-quiet", "--force-media-title=",
                                       f"--input-ipc-server={self.sock}", "--title=Notch"] + urls,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # until mpv answers, show the first song as loading
+        first = self.items[0]
+        self._last = {"id": first["id"], "title": first["title"], "channel": first.get("channel", ""), "at": time.monotonic(),
+                      "position": 0.0, "length": 0.0, "playing": True}
+        threading.Thread(target=self._poll, args=(self.proc,), daemon=True, name="mpv-status").start()
         return True
 
     def command(self, *args):
@@ -145,3 +221,4 @@ class Player:
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
         self.proc = None
+        self.items = []

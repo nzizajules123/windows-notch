@@ -32,6 +32,18 @@ def fetch(title: str, artist: str, duration: float = 0):
     return lines
 
 
+def stage(lines, pos: float):
+    """(previous, current, next) lines around pos, for the three-line lyrics stage."""
+    i = -1
+    for k, (t, _) in enumerate(lines):
+        if t <= pos + 0.25:
+            i = k
+        else:
+            break
+    get = lambda k: lines[k][1] if 0 <= k < len(lines) else ""  # noqa: E731
+    return get(i - 1), get(i) if i >= 0 else "♪", get(i + 1)
+
+
 def line_at(lines, pos: float):
     cur = None
     for t, text in lines:

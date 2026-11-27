@@ -2,7 +2,8 @@ from __future__ import annotations
 
 """Live voice conversation with Gemini (Live API, speech to speech) — the same notch you talk to on Windows.
 The mic streams to Gemini; it answers out loud with captions; it can act on the PC through tools. While it speaks the
-mic sends silence (half-duplex) so it never answers itself; with music on, only clear speech passes."""
+mic sends silence (half-duplex) so it never answers itself; with music on, only clear speech passes. Gemini closes each
+connection after about ten minutes: the chat then carries on in a new connection, with the conversation remembered."""
 import asyncio
 import base64
 import json
@@ -40,14 +41,19 @@ class Talk:
         self.on_caption = lambda text: None
         self.on_exchange = lambda you, notch: None
         self.tools = []                       # function declarations
-        self.handler = None                   # (name, args) -> (result, end_after)
+        self.handler = None                   # (name, args) -> (result, end_after_reply)
         self.music_playing = lambda: False
         self.keep_alive = False
+        # QA: typed messages instead of the microphone (tests the AI and its actions without speaking)
+        self.text_only = False
+        self.script: list[str] = []
         self._loop = None
         self._ws = None
         self._stop = threading.Event()
         self._model = None
         self._search_blocked = False
+        self._handle = None                   # session resumption handle
+        self._end_after_reply = False
 
     @property
     def active(self):
@@ -64,6 +70,8 @@ class Talk:
             self._set("off", "Live talk needs python3-websockets (run install.sh again)")
             return
         self._stop.clear()
+        self._handle = None
+        self._end_after_reply = False
         self._set("connecting")
         threading.Thread(target=lambda: asyncio.run(self._run(prompt, opening)), daemon=True, name="talk").start()
 
@@ -113,11 +121,12 @@ class Talk:
             "systemInstruction": {"parts": [{"text": prompt}]},
             "inputAudioTranscription": {}, "outputAudioTranscription": {},
             "contextWindowCompression": {"slidingWindow": {}},
+            "sessionResumption": {"handle": self._handle} if self._handle else {},
             "tools": tools}}
 
     @staticmethod
     def _connect(key):
-        # websockets >= 13 calls it additional_headers; older versions (Ubuntu 22.04) extra_headers
+        # websockets >= 13 calls it additional_headers; older versions (Ubuntu 22.04 / 24.04) extra_headers
         try:
             major = int(str(getattr(websockets, "__version__", "0")).split(".")[0])
         except ValueError:
@@ -131,25 +140,36 @@ class Talk:
         key = self.key_fn()
         speaker = Speaker(24000)
         error = None
+        resumed = False
         try:
-            for _ in range(2):
+            for _ in range(12):            # a long chat: each connection lasts ~10 minutes
                 use_search = not self._search_blocked
-                heard = None
-                reason = ""
+                outcome, reason = None, ""
                 try:
                     async with self._connect(key) as ws:
                         self._ws = ws
                         await ws.send(json.dumps(self._setup(prompt, key, use_search)))
-                        log(f"live talk: connected ({self._model})")
-                        heard = await self._session(ws, opening, speaker)
+                        log(f"live talk: connected ({self._model})" + (" — carrying on the conversation" if resumed else ""))
+                        outcome = await self._session(ws, None if resumed else opening, speaker, resumed)
                         reason = getattr(ws, "close_reason", "") or ""
                 except websockets.exceptions.ConnectionClosed as e:
                     reason = str(e)
+                if self._stop.is_set():
+                    break
                 # Google Search isn't allowed on this key (quota / plan): carry on without it
-                if use_search and not heard and not self._stop.is_set() and any(w in reason.lower() for w in ("quota", "search", "ground")):
+                if use_search and outcome != "heard" and any(w in reason.lower() for w in ("quota", "search", "ground")):
                     log("live talk: Google Search not available on this key — continuing without it")
                     self._search_blocked = True
                     continue
+                if outcome == "go_away" and self._handle:
+                    log("live talk: reconnecting (session continues)")
+                    resumed = True
+                    self._set("connecting")
+                    continue
+                if outcome == "go_away":
+                    log("live talk: stopped (session time limit)")
+                elif reason and outcome is None:
+                    error = "Gemini: " + reason[:120]
                 break
         except Exception as e:
             if not self._stop.is_set():
@@ -160,12 +180,13 @@ class Talk:
             speaker.stop()
             self._set("off", error)
 
-    async def _session(self, ws, opening, speaker):
+    async def _session(self, ws, opening, speaker, resumed):
+        """Returns "go_away" (time limit: reconnect), "heard" (Gemini answered at least once) or None."""
         queue = asyncio.Queue()
         last_activity = [time.monotonic()]
         gate = {"until": 0.0, "floor": 800.0}
         model_line, user_line, turn_user = [], [], [""]
-        heard = None
+        outcome = None
         mic = None
 
         def on_block(pcm):
@@ -192,28 +213,46 @@ class Talk:
                 await self._send({"realtimeInput": {"audio": {"data": base64.b64encode(pcm).decode(), "mimeType": "audio/pcm;rate=16000"}}})
                 limit = 15 * 60 if self.music_playing() else 75
                 if not self.keep_alive and time.monotonic() - last_activity[0] > limit:
-                    log("live talk: quiet for a while")
+                    log("live talk: stopped (quiet for a while)")
+                    self._stop.set()
                     await ws.close()
                     return
                 if self.state == "speaking" and not speaker.playing:
                     self._set("listening")
+
+        async def typed():
+            # QA: nothing to stream; the next typed message goes out when an answer is complete
+            while not self._stop.is_set():
+                await asyncio.sleep(0.5)
 
         pump_task = None
         try:
             async for raw in ws:
                 msg = json.loads(raw)
                 if "setupComplete" in msg:
-                    mic = Mic(16000, on_block)
-                    if not mic.start():
-                        self._set("off", "No microphone tool found (install pulseaudio-utils or pipewire)")
-                        return heard
-                    pump_task = asyncio.create_task(pump())
+                    if self.text_only:
+                        pump_task = asyncio.create_task(typed())
+                    else:
+                        mic = Mic(16000, on_block)
+                        if not mic.start():
+                            self._stop.set()
+                            self._set("off", "No microphone tool found (install pulseaudio-utils or pipewire)")
+                            return outcome
+                        pump_task = asyncio.create_task(pump())
                     self._set("listening")
-                    await self._send(self._turn(opening or GREETING))
+                    if not resumed:
+                        first = opening or (self.script.pop(0) if self.script else GREETING)
+                        if self.text_only:
+                            log(f"live talk (typed): {first}")
+                        await self._send(self._turn(first))
+                    continue
+                ru = msg.get("sessionResumptionUpdate")
+                if ru is not None:
+                    if ru.get("newHandle") and ru.get("resumable", True) is not False:
+                        self._handle = ru["newHandle"]
                     continue
                 if "goAway" in msg:
-                    log("live talk: session time limit")
-                    break
+                    return "go_away"
                 if "toolCall" in msg:
                     asyncio.create_task(self._tools(msg["toolCall"].get("functionCalls", []), last_activity))
                     continue
@@ -234,8 +273,9 @@ class Talk:
                 for part in (sc.get("modelTurn") or {}).get("parts", []):
                     data = (part.get("inlineData") or {}).get("data")
                     if data:
-                        speaker.write(base64.b64decode(data))
-                        heard = True
+                        if not self.text_only:
+                            speaker.write(base64.b64decode(data))
+                        outcome = "heard"
                         last_activity[0] = time.monotonic()
                         if self.state != "speaking":
                             self._set("speaking")
@@ -247,16 +287,36 @@ class Talk:
                     self.on_caption("✨  " + "".join(model_line).strip()[-70:])
                 if sc.get("turnComplete"):
                     said = "".join(model_line).strip()
+                    if self.text_only:
+                        log(f"live talk (answer): {said}")
+                        self._set("listening")
                     if said and turn_user[0]:
                         self.on_exchange(turn_user[0], said)
                     turn_user[0] = ""
                     model_line.clear()
+                    if self._end_after_reply:
+                        # e.g. "lock the PC": say the short reply, then end the chat
+                        while speaker.playing:
+                            await asyncio.sleep(0.1)
+                        log("live talk: stopped (action done)")
+                        self._stop.set()
+                        await ws.close()
+                        break
+                    if self.text_only:
+                        if self.script:
+                            nxt = self.script.pop(0)
+                            log(f"live talk (typed): {nxt}")
+                            await self._send(self._turn(nxt))
+                        else:
+                            self._stop.set()
+                            await ws.close()
+                            break
         finally:
             if pump_task:
                 pump_task.cancel()
             if mic:
                 mic.stop()
-        return heard
+        return outcome
 
     async def _tools(self, calls, last_activity):
         out = []
@@ -264,7 +324,9 @@ class Talk:
             name, args = c.get("name", ""), c.get("args") or {}
             try:
                 if self.handler:
-                    result, _ = await asyncio.get_running_loop().run_in_executor(None, self.handler, name, args)
+                    result, end = await asyncio.get_running_loop().run_in_executor(None, self.handler, name, args)
+                    if end:
+                        self._end_after_reply = True
                 else:
                     result = "Not available."
             except Exception as e:
@@ -273,4 +335,3 @@ class Talk:
             out.append({"id": c.get("id"), "name": name, "response": {"result": result}})
         last_activity[0] = time.monotonic()
         await self._send({"toolResponse": {"functionResponses": out}})
-

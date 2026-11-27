@@ -16,6 +16,7 @@ class Track:
         self.title = _first(meta.get("xesam:title")) or ""
         self.artist = _first(meta.get("xesam:artist")) or ""
         self.art_url = meta.get("mpris:artUrl") or ""
+        self.trackid = meta.get("mpris:trackid") or ""
         self.length = (meta.get("mpris:length") or 0) / 1e6
         self.playing = status == "Playing"
         self._pos = position_us / 1e6
@@ -29,6 +30,19 @@ class Track:
     @property
     def key(self):
         return f"{self.bus_name}|{self.title}|{self.artist}"
+
+
+class OwnTrack(Track):
+    """A song the notch itself plays (search / "play …" by voice), shown like any other player."""
+    OWN = "notch-player"
+
+    def __init__(self, st):
+        self.bus_name, self.app = self.OWN, "YouTube"
+        self.title, self.artist = st["title"], st["channel"]
+        self.art_url = f"https://i.ytimg.com/vi/{st['id']}/hqdefault.jpg"
+        self.trackid = ""
+        self.length, self.playing = st["length"], st["playing"]
+        self._pos, self._at = st["position"], time.monotonic()
 
 
 def _first(v):
@@ -66,16 +80,40 @@ class Media:
         except GLib.Error:
             return None
 
-    def refresh(self) -> Track | None:
-        """Picks the player that's playing (else the one we showed, else any)."""
-        tracks = [t for t in (self._read(n) for n in self._players()) if t and t.title]
+    def refresh(self, own: dict | None = None) -> Track | None:
+        """Picks the player that's playing (else the one we showed, else any). own = the notch's own player's status."""
+        tracks = [t for t in (self._read(n) for n in self._players()) if t and t.title and not (own and ".mpv" in t.bus_name)]
+        if own:
+            tracks.insert(0, OwnTrack(own))
         playing = [t for t in tracks if t.playing]
         keep = [t for t in tracks if self.current and t.bus_name == self.current.bus_name]
         self.current = (playing or keep or tracks or [None])[0]
         return self.current
 
+    def seek(self, seconds: float):
+        t = self.current
+        if t and t.bus_name != OwnTrack.OWN and t.trackid:
+            try:
+                self._call(t.bus_name, PLAYER, "SetPosition", GLib.Variant("(ox)", (t.trackid, int(seconds * 1e6))))
+            except GLib.Error:
+                pass
+
+    def get_volume(self, bus_name) -> float | None:
+        try:
+            return self._call(bus_name, "org.freedesktop.DBus.Properties", "Get", GLib.Variant("(ss)", (PLAYER, "Volume")),
+                              GLib.VariantType("(v)")).unpack()[0]
+        except GLib.Error:
+            return None
+
+    def set_volume(self, bus_name, v: float):
+        try:
+            self._call(bus_name, "org.freedesktop.DBus.Properties", "Set",
+                       GLib.Variant("(ssv)", (PLAYER, "Volume", GLib.Variant("d", max(0.0, min(1.0, v))))))
+        except GLib.Error:
+            pass
+
     def _player(self, method):
-        if self.current:
+        if self.current and self.current.bus_name != OwnTrack.OWN:
             try:
                 self._call(self.current.bus_name, PLAYER, method)
             except GLib.Error:

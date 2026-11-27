@@ -357,18 +357,24 @@ Build it yourself with JDK 17 and the Android SDK (platform 35): `cd android` th
 ## Linux: Notch for Linux
 
 The notch for Linux desktops (Ubuntu, Debian, Fedora, Arch, openSUSE…), in [`linux/`](linux): Python + GTK 3.
-- **The pill:** a small island at the top of the screen with the time, the living eyes and the battery. While music
-  plays it shows equalizer bars and the current lyric line (LRCLIB).
-- **Hover to open:**
-  - **Media:** what's playing in Spotify, Firefox, Chrome, VLC or any MPRIS player, with controls, synced lyrics, and a
-    YouTube search that plays in the background with mpv (or in the browser).
-  - **To-do:** tasks in plain words, with reminders.
+- **The pill:** a small island at the top of the screen with the time, the living eyes and a battery icon. While music
+  plays it shows the album cover, equalizer bars and the current lyric line (LRCLIB), tinted in the cover's colour.
+- **Hover to open** (icon tabs, like on Windows):
+  - **Media:** what's playing in Spotify, Firefox, Chrome, VLC or any MPRIS player, and songs the notch plays itself:
+    big cover, title, a seekable progress bar, previous / play / next, a three-line lyrics stage, and a YouTube search
+    that plays in the background with mpv (or in the browser).
+  - **To-do:** tasks in plain words, with reminders (late ones in red).
+  - **Apps:** every open window with its icon: switch to it or close it, or type an app's name to open it.
+  - **Talk:** start or stop a chat, see what was said, and what the notch remembers about you (forget a note with ✕).
   - **Control:** lock, sleep, restart and shut down (with a countdown), and switches.
-- **Talk with the notch** (Gemini Live): the 🎙 button, or four claps. It's the same as on Windows:
-  - it opens and closes apps, plays and controls music, searches, adds to-dos, and writes documents (.docx or text)
-    to the folder you name;
-  - it shows the privacy screen and locks the PC;
+- **Talk with the notch** (Gemini Live): the Talk tab, or four claps. It's the same as on Windows:
+  - it opens, switches to and closes apps, plays and controls music (turned down while you talk), searches, adds
+    to-dos, and writes documents (.docx or text) to the folder you name;
+  - it shows the privacy screen and locks the PC (then the chat ends);
   - it knows your name and hobbies, remembers your chats and notes, and starts chats now and then;
+  - long chats carry on past Gemini's 10-minute connection limit;
+  - when you switch it off it stays off: nothing restarts it for a while (no echo, no double press, no chat on its own
+    within 45 minutes);
   - due to-dos start a conversation.
 - **Healthy breaks**, plus breaks you ask for, now or at a set time. The break screen can't be closed early (emergency
   only: hold Ctrl+Shift+E for 5 s).

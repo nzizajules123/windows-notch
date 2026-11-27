@@ -159,19 +159,42 @@ def open_app(spoken: str):
 
 
 def windows():
-    """[(id, title)] of open windows (needs wmctrl)."""
+    """[(id, title, app)] of open windows (needs wmctrl). app = the window's class, e.g. "firefox", "code"."""
     if not shutil.which("wmctrl"):
         return None
     try:
-        out = subprocess.run(["wmctrl", "-l"], capture_output=True, text=True, timeout=3).stdout
+        out = subprocess.run(["wmctrl", "-lx"], capture_output=True, text=True, timeout=3).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     res = []
     for line in out.splitlines():
-        parts = line.split(None, 3)
-        if len(parts) == 4 and parts[1] != "-1":       # -1 = sticky desktop / panels
-            res.append((parts[0], parts[3]))
+        parts = line.split(None, 4)
+        if len(parts) == 5 and parts[1] != "-1":       # -1 = sticky desktop / panels
+            cls = parts[2].split(".")[-1] if "." in parts[2] else parts[2]
+            if parts[4] != "Notch" and cls.lower() != "notch":
+                res.append((parts[0], parts[4], cls))
     return res
+
+
+def app_icon(cls: str) -> str:
+    """An icon name for a window class (from the installed app's .desktop entry), or a generic one."""
+    want = cls.lower()
+    for a in Gio.AppInfo.get_all():
+        ids = {(a.get_id() or "").lower().removesuffix(".desktop"), (a.get_executable() or "").lower().split("/")[-1],
+               _norm(a.get_display_name() or "")}
+        if want in ids or any(want == i.split(".")[-1] for i in ids if i):
+            icon = a.get_icon()
+            if icon and hasattr(icon, "get_names"):
+                return icon.get_names()[0]
+    return "application-x-executable"
+
+
+def focus_id(wid: str):
+    subprocess.run(["wmctrl", "-ia", wid], timeout=3)
+
+
+def close_id(wid: str):
+    subprocess.run(["wmctrl", "-ic", wid], timeout=3)
 
 
 def close_windows(spoken: str):
@@ -179,20 +202,27 @@ def close_windows(spoken: str):
     ws = windows()
     if ws is None:
         return None
-    want = _norm(spoken)
-    hits = [w for w in ws if want and want in _norm(w[1]) and "notch" not in w[1].lower()]
-    for wid, _ in hits:
-        subprocess.run(["wmctrl", "-ic", wid], timeout=3)
-    return [t for _, t in hits]
+    want = ALIASES.get(_norm(spoken), _norm(spoken))
+    hits = [w for w in ws if _matches(want, w)]
+    for wid, _, _ in hits:
+        close_id(wid)
+    return [t for _, t, _ in hits]
+
+
+def _matches(want, w):
+    # by its app (window class: "firefox", "code"…) or by words in its title
+    _, title, cls = w
+    c = _norm(cls)
+    return bool(want) and (want == c or want.replace(" ", "") == c.replace(" ", "") or want in _norm(title)
+                           or (want == "visual studio code" and c == "code"))
 
 
 def focus_window(spoken: str):
-    ws = windows() or []
-    want = _norm(spoken)
-    for wid, title in ws:
-        if want and want in _norm(title):
-            subprocess.run(["wmctrl", "-ia", wid], timeout=3)
-            return title
+    want = ALIASES.get(_norm(spoken), _norm(spoken))
+    for w in windows() or []:
+        if _matches(want, w):
+            focus_id(w[0])
+            return w[1]
     return None
 
 
